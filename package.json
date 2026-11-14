@@ -1,0 +1,30 @@
+{
+  "name": "expense-tracker-backend",
+  "version": "1.0.0",
+  "description": "Expense Tracker Node.js Backend API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "expense-tracker",
+    "nodejs",
+    "express",
+    "mysql"
+  ],
+  "author": "SIVESH",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.7.4",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14"
+  }
+}

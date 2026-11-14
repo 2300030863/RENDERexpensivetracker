@@ -1,0 +1,37 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Maven build output (legacy)
+target/
+*.war
+*.jar
+*.class
+
+# IDE files
+.idea/
+*.iml
+.eclipse/
+.classpath
+.project
+.settings/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment / secrets (never commit these)
+.env
+.env.local
+.env.*.local
+
+# Temp/scratch files
+*.tmp
+*.bak

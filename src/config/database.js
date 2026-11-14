@@ -1,0 +1,340 @@
+const mysql = require('mysql2/promise');
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+// Resolve configuration from either Node DB_* or Spring spring.datasource.* properties
+let host = process.env.DB_HOST;
+let port = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 4000;
+let user = process.env.DB_USER || process.env.SPRING_DATASOURCE_USERNAME || process.env['spring.datasource.username'] || '24W5MntTi8JPMZk.root';
+let password = process.env.DB_PASSWORD || process.env.SPRING_DATASOURCE_PASSWORD || process.env['spring.datasource.password'] || 'p7UBkfxZZfB5H1id';
+let database = process.env.DB_NAME || 'expense_tracker';
+
+// Parse JDBC / database connection URL if provided
+const datasourceUrl =
+  process.env.SPRING_DATASOURCE_URL ||
+  process.env['spring.datasource.url'] ||
+  process.env.DATABASE_URL;
+
+if (datasourceUrl) {
+  try {
+    const cleanUrl = datasourceUrl.replace(/^jdbc:/, '');
+    const parsed = new URL(cleanUrl);
+    if (parsed.hostname) host = parsed.hostname;
+    if (parsed.port) port = parseInt(parsed.port, 10);
+    if (parsed.username) user = decodeURIComponent(parsed.username);
+    if (parsed.password) password = decodeURIComponent(parsed.password);
+    if (parsed.pathname && parsed.pathname.length > 1) {
+      database = parsed.pathname.replace(/^\//, '').split('?')[0];
+    }
+  } catch (err) {
+    const match = datasourceUrl.match(/mysql:\/\/([^:/]+)(?::(\d+))?\/([^?]+)/);
+    if (match) {
+      host = match[1];
+      if (match[2]) port = parseInt(match[2], 10);
+      if (match[3]) database = match[3];
+    }
+  }
+}
+
+host = host || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+
+const dbConfig = {
+  host,
+  port,
+  user,
+  password,
+  database,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+};
+
+if (
+  process.env.DB_SSL === 'true' ||
+  process.env.DB_SSL === true ||
+  !process.env.DB_SSL ||
+  (datasourceUrl && datasourceUrl.includes('sslMode'))
+) {
+  dbConfig.ssl = {
+    rejectUnauthorized: false,
+  };
+}
+
+const pool = mysql.createPool(dbConfig);
+
+// Helper method to execute queries with error logging
+async function query(sql, params = []) {
+  try {
+    const [results] = await pool.query(sql, params);
+    return results;
+  } catch (error) {
+    console.error('Database Query Error:', error.message);
+    console.error('Query was:', sql);
+    console.error('Parameters:', params);
+    throw error;
+  }
+}
+
+// Helper method to execute statements (INSERT, UPDATE, DELETE)
+async function execute(sql, params = []) {
+  try {
+    const [result] = await pool.execute(sql, params);
+    return result;
+  } catch (error) {
+    console.error('Database Execute Error:', error.message);
+    console.error('Query was:', sql);
+    console.error('Parameters:', params);
+    throw error;
+  }
+}
+
+// Ensure all required tables and columns exist (Self-healing schema migration)
+async function initializeSchema() {
+  try {
+    console.log('Verifying database tables and schema...');
+
+    // 1. Users table
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        password VARCHAR(100) NOT NULL,
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        country VARCHAR(100),
+        role VARCHAR(20) NOT NULL DEFAULT 'ROLE_USER',
+        blocked BOOLEAN DEFAULT FALSE,
+        admin_id BIGINT,
+        user_group_id BIGINT,
+        occupation_id BIGINT,
+        is_oauth_user BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_username (username),
+        INDEX idx_user_email (email),
+        INDEX idx_user_role (role),
+        INDEX idx_user_admin_id (admin_id),
+        INDEX idx_user_group_id (user_group_id),
+        INDEX idx_user_occupation (occupation_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 2. Admins table
+    await query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        password VARCHAR(100) NOT NULL,
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        is_active BOOLEAN DEFAULT TRUE,
+        owner_id BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 3. User Groups table
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_groups (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description VARCHAR(500),
+        admin_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 4. Accounts table
+    await query(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description VARCHAR(500),
+        type VARCHAR(50),
+        balance DECIMAL(10, 2) DEFAULT 0.00,
+        is_active BOOLEAN DEFAULT TRUE,
+        user_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_account_user (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 5. Categories table
+    await query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description VARCHAR(500),
+        color VARCHAR(7),
+        is_default BOOLEAN DEFAULT FALSE,
+        is_occupation_generated BOOLEAN DEFAULT FALSE,
+        user_id BIGINT,
+        admin_id BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_category_user_id (user_id),
+        INDEX idx_category_admin_id (admin_id),
+        INDEX idx_category_is_default (is_default)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 6. Occupations table
+    await query(`
+      CREATE TABLE IF NOT EXISTS occupations (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        occupation_type VARCHAR(50) NOT NULL,
+        description VARCHAR(500),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_occupation_type (occupation_type)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 7. Occupation Category Templates table
+    await query(`
+      CREATE TABLE IF NOT EXISTS occupation_category_templates (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        occupation_id BIGINT NOT NULL,
+        category_name VARCHAR(100) NOT NULL,
+        description VARCHAR(500),
+        color VARCHAR(7),
+        display_order INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_template_occupation (occupation_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 8. Recurring Transactions table
+    await query(`
+      CREATE TABLE IF NOT EXISTS recurring_transactions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        description VARCHAR(200) NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        recurrence_type VARCHAR(50) NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE,
+        next_due_date DATE,
+        notes VARCHAR(500),
+        is_active BOOLEAN DEFAULT TRUE,
+        user_id BIGINT NOT NULL,
+        category_id BIGINT NOT NULL,
+        account_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_recurring_user_id (user_id),
+        INDEX idx_recurring_next_due_date (next_due_date),
+        INDEX idx_recurring_is_active (is_active)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 9. Transactions table
+    await query(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        amount DECIMAL(10, 2) NOT NULL,
+        description VARCHAR(200) NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        transaction_date DATE NOT NULL,
+        notes VARCHAR(500),
+        user_id BIGINT,
+        category_id BIGINT NOT NULL,
+        account_id BIGINT NOT NULL,
+        recurring_transaction_id BIGINT,
+        admin_id BIGINT,
+        is_approved BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_transaction_user_id (user_id),
+        INDEX idx_transaction_date (transaction_date),
+        INDEX idx_transaction_category_id (category_id),
+        INDEX idx_transaction_account_id (account_id),
+        INDEX idx_transaction_type (type)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 10. Budgets table
+    await query(`
+      CREATE TABLE IF NOT EXISTS budgets (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        amount DECIMAL(10, 2) NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        type VARCHAR(50),
+        alert_threshold INT DEFAULT 80,
+        is_active BOOLEAN DEFAULT TRUE,
+        user_id BIGINT NOT NULL,
+        category_id BIGINT,
+        admin_id BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_budget_user_id (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 11. Email OTPs table
+    await query(`
+      CREATE TABLE IF NOT EXISTS email_otps (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        otp VARCHAR(6) NOT NULL,
+        verified BOOLEAN DEFAULT FALSE,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_otp_email (email)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 12. Password Reset Tokens table
+    await query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        user_id BIGINT NOT NULL,
+        expiry_date TIMESTAMP NOT NULL,
+        used BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_reset_token (token)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // Ensure columns exist on tables (in case of partial migrations)
+    try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT FALSE`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_oauth_user BOOLEAN DEFAULT FALSE`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS occupation_id BIGINT`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_occupation_generated BOOLEAN DEFAULT FALSE`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE email_otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0`);
+    } catch (_) {}
+
+    console.log('✓ Database schema verified successfully!');
+  } catch (error) {
+    console.error('Warning: Schema check encountered an issue:', error.message);
+    // Don't crash - database might already have tables with constraints
+  }
+}
+
+module.exports = {
+  pool,
+  query,
+  execute,
+  initializeSchema,
+};
+
