@@ -54,18 +54,22 @@ class PasswordResetService {
     const text = this.buildPasswordResetEmailText(firstName, otp, resetUrl);
     const html = this.buildPasswordResetEmailHtml(firstName, otp, resetUrl);
 
+    let delivered = false;
     try {
-      await sendMail({ to: user.email, subject, text, html });
-      console.log(`[PasswordResetService] Password reset OTP sent successfully to: ${user.email}`);
+      const mailResult = await sendMail({ to: user.email, subject, text, html });
+      delivered = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
+      console.log(`[PasswordResetService] Password reset OTP processed for: ${user.email} (Delivered: ${delivered})`);
     } catch (err) {
-      console.error(`[PasswordResetService] Failed to send email to ${user.email}:`, err);
-      throw new Error('Failed to send password reset email. Please try again later.');
+      console.error(`[PasswordResetService] Failed to send email to ${user.email}:`, err.message);
+      delivered = false;
     }
 
     return {
       success: true,
       email: user.email,
       username: user.username,
+      delivered,
+      devOtp: !delivered ? otp : undefined,
     };
   }
 

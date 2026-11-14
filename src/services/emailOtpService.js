@@ -32,13 +32,27 @@ class EmailOtpService {
     // Store OTP in database
     await emailOtpRepository.create(email, otp, expiresAt);
 
-    // Send email
+    // Send email with fallback handling
     const subject = 'Verify Your Email – Expense Tracker';
     const text = `Your verification code is: ${otp}\n\nThis code expires in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you didn't request this, please ignore this email.`;
     const html = this.buildOtpEmailHtml(otp);
 
-    await sendMail({ to: email, subject, text, html });
-    console.log(`[EmailOtpService] OTP sent to: ${email}`);
+    let delivered = false;
+    try {
+      const mailResult = await sendMail({ to: email, subject, text, html });
+      delivered = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
+      console.log(`[EmailOtpService] OTP processed for ${email} (Delivered: ${delivered})`);
+    } catch (err) {
+      console.warn(`[EmailOtpService] Mail delivery error for ${email}:`, err.message);
+      delivered = false;
+    }
+
+    return {
+      success: true,
+      email,
+      delivered,
+      devOtp: !delivered ? otp : undefined,
+    };
   }
 
   async verifyOtp(email, otp) {

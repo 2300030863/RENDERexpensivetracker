@@ -12,9 +12,13 @@ class PasswordResetController {
 
       return res.status(200).json({
         success: true,
-        message: 'Verification code sent to your registered email',
+        message: result.delivered
+          ? 'Verification code sent to your registered email'
+          : 'Verification code generated for your account',
         email: result.email,
         username: result.username,
+        delivered: result.delivered,
+        devOtp: result.devOtp,
       });
     } catch (error) {
       if (error.message === 'User not found') {

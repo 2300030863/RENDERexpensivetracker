@@ -57,8 +57,13 @@ class AuthController {
         return res.status(400).send('Email is required');
       }
 
-      await emailOtpService.sendOtp(email.trim());
-      return res.status(200).json({ message: 'OTP sent successfully', success: true });
+      const result = await emailOtpService.sendOtp(email.trim());
+      return res.status(200).json({ 
+        message: result.delivered ? 'OTP sent successfully to your email' : 'OTP generated successfully', 
+        success: true,
+        delivered: result.delivered,
+        devOtp: result.devOtp,
+      });
     } catch (error) {
       console.error('Send OTP error:', error);
       return res.status(400).json({ message: error.message, success: false });
