@@ -324,6 +324,32 @@ async function initializeSchema() {
       await query(`ALTER TABLE email_otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0`);
     } catch (_) {}
 
+    // Ensure created_at has DEFAULT CURRENT_TIMESTAMP across all tables in MySQL/TiDB
+    const tablesForCreatedAt = [
+      'email_otps',
+      'password_reset_tokens',
+      'users',
+      'admins',
+      'user_groups',
+      'accounts',
+      'categories',
+      'budgets',
+      'recurring_transactions',
+      'transactions',
+      'occupations',
+      'occupation_category_templates'
+    ];
+
+    for (const tbl of tablesForCreatedAt) {
+      try {
+        await query(`ALTER TABLE ${tbl} MODIFY COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+      } catch (_) {
+        try {
+          await query(`ALTER TABLE ${tbl} MODIFY COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+        } catch (_) {}
+      }
+    }
+
     console.log('✓ Database schema verified successfully!');
   } catch (error) {
     console.error('Warning: Schema check encountered an issue:', error.message);

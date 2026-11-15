@@ -31,8 +31,8 @@ class OccupationRepository {
 
   async createOccupation(name, occupationType, description) {
     const sql = `
-      INSERT INTO occupations (name, occupation_type, description)
-      VALUES (?, ?, ?)
+      INSERT INTO occupations (name, occupation_type, description, created_at)
+      VALUES (?, ?, ?, NOW())
     `;
     const result = await execute(sql, [name, occupationType, description]);
     return await this.findById(result.insertId);
@@ -40,8 +40,8 @@ class OccupationRepository {
 
   async createTemplate(occupationId, categoryName, description, color, displayOrder) {
     const sql = `
-      INSERT INTO occupation_category_templates (occupation_id, category_name, description, color, display_order)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO occupation_category_templates (occupation_id, category_name, description, color, display_order, created_at)
+      VALUES (?, ?, ?, ?, ?, NOW())
     `;
     const result = await execute(sql, [occupationId, categoryName, description, color, displayOrder]);
     const [row] = await query('SELECT * FROM occupation_category_templates WHERE id = ?', [result.insertId]);

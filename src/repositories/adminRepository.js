@@ -36,8 +36,8 @@ class AdminRepository {
 
   async create(admin) {
     const sql = `
-      INSERT INTO admins (username, email, password, first_name, last_name, is_active, owner_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO admins (username, email, password, first_name, last_name, is_active, owner_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       admin.username,

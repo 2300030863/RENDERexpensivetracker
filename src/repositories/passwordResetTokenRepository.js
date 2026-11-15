@@ -22,8 +22,8 @@ class PasswordResetTokenRepository {
 
   async create(token, userId, expiryDate) {
     const sql = `
-      INSERT INTO password_reset_tokens (token, user_id, expiry_date, used)
-      VALUES (?, ?, ?, 0)
+      INSERT INTO password_reset_tokens (token, user_id, expiry_date, used, created_at)
+      VALUES (?, ?, ?, 0, NOW())
     `;
     const result = await execute(sql, [token, userId, expiryDate]);
     const [row] = await query('SELECT * FROM password_reset_tokens WHERE id = ?', [result.insertId]);

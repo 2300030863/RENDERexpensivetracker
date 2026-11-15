@@ -29,8 +29,8 @@ class EmailOtpRepository {
 
   async create(email, otp, expiresAt) {
     const sql = `
-      INSERT INTO email_otps (email, otp, verified, expires_at)
-      VALUES (?, ?, 0, ?)
+      INSERT INTO email_otps (email, otp, verified, expires_at, created_at)
+      VALUES (?, ?, 0, ?, NOW())
     `;
     const result = await execute(sql, [email, otp, expiresAt]);
     const [row] = await query('SELECT * FROM email_otps WHERE id = ?', [result.insertId]);

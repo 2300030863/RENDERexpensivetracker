@@ -16,8 +16,8 @@ class UserGroupRepository {
 
   async create(group) {
     const sql = `
-      INSERT INTO user_groups (name, description, admin_id)
-      VALUES (?, ?, ?)
+      INSERT INTO user_groups (name, description, admin_id, created_at)
+      VALUES (?, ?, ?, NOW())
     `;
     const params = [
       group.name,

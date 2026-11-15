@@ -97,8 +97,8 @@ class UserRepository {
     const sql = `
       INSERT INTO users (
         username, email, password, first_name, last_name, country, role, 
-        blocked, admin_id, user_group_id, occupation_id, is_oauth_user
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        blocked, admin_id, user_group_id, occupation_id, is_oauth_user, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       user.username,

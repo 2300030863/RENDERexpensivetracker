@@ -96,8 +96,8 @@ class CategoryRepository {
 
   async create(cat) {
     const sql = `
-      INSERT INTO categories (name, description, color, is_default, is_occupation_generated, user_id, admin_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO categories (name, description, color, is_default, is_occupation_generated, user_id, admin_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       cat.name,

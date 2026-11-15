@@ -61,8 +61,8 @@ class BudgetRepository {
 
   async create(budget) {
     const sql = `
-      INSERT INTO budgets (amount, start_date, end_date, type, alert_threshold, is_active, user_id, category_id, admin_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO budgets (amount, start_date, end_date, type, alert_threshold, is_active, user_id, category_id, admin_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       parseFloat(budget.amount),

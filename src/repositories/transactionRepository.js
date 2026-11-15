@@ -315,8 +315,8 @@ class TransactionRepository {
     const sql = `
       INSERT INTO transactions (
         amount, description, type, transaction_date, notes, 
-        user_id, category_id, account_id, recurring_transaction_id, admin_id, is_approved
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        user_id, category_id, account_id, recurring_transaction_id, admin_id, is_approved, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       parseFloat(txn.amount),

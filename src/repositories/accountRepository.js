@@ -62,8 +62,8 @@ class AccountRepository {
 
   async create(account) {
     const sql = `
-      INSERT INTO accounts (name, description, type, balance, is_active, user_id)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO accounts (name, description, type, balance, is_active, user_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       account.name,

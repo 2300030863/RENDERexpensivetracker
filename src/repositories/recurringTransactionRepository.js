@@ -75,8 +75,8 @@ class RecurringTransactionRepository {
   async create(rt) {
     const sql = `
       INSERT INTO recurring_transactions (
-        description, amount, type, recurrence_type, start_date, end_date, next_due_date, notes, is_active, user_id, category_id, account_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        description, amount, type, recurrence_type, start_date, end_date, next_due_date, notes, is_active, user_id, category_id, account_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     const params = [
       rt.description,
