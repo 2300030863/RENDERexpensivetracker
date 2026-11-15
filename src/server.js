@@ -22,7 +22,7 @@ app.set('trust proxy', 1);
 // 2. HTTP Security Firewall (Helmet)
 app.use(
   helmet({
-    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }, // Required for Google OAuth
+    crossOriginOpenerPolicy: false, // Disabled to allow Google OAuth popup window.closed inspection
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: false, // Handled per-frontend via Vercel headers
     hidePoweredBy: true, // Strips 'X-Powered-By: Express' to prevent stack fingerprinting

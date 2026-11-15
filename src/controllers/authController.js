@@ -219,6 +219,76 @@ class AuthController {
     }
   }
 
+  async testEmail(req, res) {
+    try {
+      const apiKey = (process.env.BREVO_API_KEY || process.env.BRAVE_API_KEY || '').trim();
+      const targetEmail = (req.query.to || req.query.email || 'siveshkommalapati167@gmail.com').trim();
+      const mailFrom = (process.env.MAIL_FROM || 'siveshkommalapati167@gmail.com').trim();
+
+      const diagnostics = {
+        hasBrevoKey: Boolean(apiKey),
+        keyPrefix: apiKey ? apiKey.substring(0, 15) + '...' : 'none',
+        mailFrom,
+        targetEmail,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (!apiKey) {
+        return res.status(200).json({
+          success: false,
+          error: 'BREVO_API_KEY is missing from environment variables on Render',
+          diagnostics,
+        });
+      }
+
+      // 1. Test Brevo Senders API & IP authentication
+      const sendersRes = await fetch('https://api.brevo.com/v3/senders', {
+        headers: {
+          'accept': 'application/json',
+          'api-key': apiKey,
+        },
+      });
+
+      diagnostics.sendersApiStatus = sendersRes.status;
+      if (!sendersRes.ok) {
+        const errorBody = await sendersRes.text();
+        diagnostics.sendersApiError = errorBody;
+        return res.status(200).json({
+          success: false,
+          error: `Brevo rejected API key or IP address (Status ${sendersRes.status}): ${errorBody}`,
+          hint: errorBody.includes('IP') || errorBody.includes('unauthorized')
+            ? 'If you added an IP address in Brevo API Key settings, REMOVE IT. Brevo IP Whitelist must be blank because Render uses dynamic outbound IPs.'
+            : 'Check if BREVO_API_KEY is valid and active in Brevo Dashboard.',
+          diagnostics,
+        });
+      }
+
+      const sendersData = await sendersRes.json();
+      diagnostics.activeSendersInBrevo = sendersData.senders || [];
+
+      // 2. Test actual email delivery via Brevo
+      const { sendMail } = require('../config/mailer');
+      const sendResult = await sendMail({
+        to: targetEmail,
+        subject: 'Expense Tracker Email Test',
+        text: 'This is a test email from Expense Tracker. Brevo API is working correctly!',
+        html: '<div style="font-family: sans-serif; padding: 20px; background: #f0fdf4; border-radius: 8px;"><h2>Expense Tracker Email Test</h2><p>Your Brevo API key is working perfectly and can deliver emails!</p></div>',
+      });
+
+      return res.status(200).json({
+        success: sendResult.delivered !== false && !sendResult.simulated,
+        sendResult,
+        diagnostics,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+        stack: error.stack,
+      });
+    }
+  }
+
   // Aliases for route flexibility
   async healthCheck(req, res) {
     return this.health(req, res);

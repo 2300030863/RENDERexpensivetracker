@@ -11,6 +11,7 @@ router.post('/google', (req, res, next) => authController.googleLogin(req, res, 
 router.post('/send-otp', (req, res, next) => authController.sendOtp(req, res, next));
 router.post('/verify-otp', (req, res, next) => authController.verifyOtp(req, res, next));
 router.get('/health', (req, res, next) => authController.healthCheck(req, res, next));
+router.get('/email-test', (req, res, next) => authController.testEmail(req, res, next));
 
 // Password reset (mapped under /auth/* for Spring Boot frontend compatibility)
 router.post('/forgot-password', (req, res, next) => passwordResetController.forgotPassword(req, res, next));
