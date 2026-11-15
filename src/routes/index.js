@@ -12,10 +12,22 @@ const analyticsRoutes = require('./analyticsRoutes');
 const recurringTransactionRoutes = require('./recurringTransactionRoutes');
 const adminRoutes = require('./adminRoutes');
 
+const analyticsController = require('../controllers/analyticsController');
+const { authenticateToken } = require('../middleware/auth');
+
 // Health and Actuator endpoints
 router.get('/health', (req, res) => res.json({ status: 'UP', service: 'Expense Tracker Backend Node.js' }));
 router.get('/actuator/health', (req, res) => res.json({ status: 'UP' }));
 router.get('/actuator/info', (req, res) => res.json({ app: { name: 'Expense Tracker API', version: '1.0.0' } }));
+
+// Dashboard alias (redirects or serves analytics data if authenticated)
+router.get('/dashboard', authenticateToken, (req, res, next) => analyticsController.getDashboardData(req, res, next));
+
+// Frontend app path redirection if accessed directly on backend domain
+router.get(['/app', '/app/*'], (req, res) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://experiencetracker.vercel.app';
+  return res.redirect(`${frontendUrl}${req.path}`);
+});
 
 // Sub-routers
 router.use('/auth', authRoutes);
