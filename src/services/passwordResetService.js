@@ -51,8 +51,8 @@ class PasswordResetService {
     const firstName = user.first_name || user.username || 'User';
 
     const subject = '[Expense Tracker] Password reset verification code';
-    const text = this.buildPasswordResetEmailText(firstName, otp);
-    const html = this.buildPasswordResetEmailHtml(firstName, otp);
+    const text = this.buildPasswordResetEmailText(firstName, otp, user.email, frontendUrl);
+    const html = this.buildPasswordResetEmailHtml(firstName, otp, user.email, frontendUrl);
 
     let delivered = false;
     try {
@@ -172,7 +172,8 @@ class PasswordResetService {
     return Date.now() <= expiry;
   }
 
-  buildPasswordResetEmailHtml(firstName, otp) {
+  buildPasswordResetEmailHtml(firstName, otp, email, frontendUrl) {
+    const autofillUrl = frontendUrl ? `${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}` : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -223,17 +224,34 @@ class PasswordResetService {
               </p>
 
               <!-- OTP Display Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 28px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 24px 0 14px;">
                 <tr>
                   <td align="center">
-                    <div style="display: inline-block; background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 36px; text-align: center;">
-                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
+                    <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; color: #059669; text-transform: uppercase; letter-spacing: 0.5px;">
+                      &#128073; Click or tap code to select &amp; copy
+                    </p>
+                    <div style="display: inline-block; background-color: #f3f4f6; border: 2px dashed #059669; border-radius: 12px; padding: 16px 36px; text-align: center;">
+                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 38px; font-weight: 800; letter-spacing: 8px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
                         ${otp}
                       </code>
                     </div>
                   </td>
                 </tr>
               </table>
+
+              <!-- Copy & Auto-Fill One-Tap Button -->
+              ${autofillUrl ? `
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 0 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="${autofillUrl}"
+                       target="_blank"
+                       style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 32px; border-radius: 10px; box-shadow: 0 4px 10px rgba(5,150,105,0.25); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                      &#128203; Copy &amp; Auto-Fill Code
+                    </a>
+                  </td>
+                </tr>
+              </table>` : ''}
 
               <p style="margin: 0 0 24px; font-size: 13px; color: #6b7280; text-align: center;">
                 This verification code will expire in <strong>${OTP_EXPIRY_MINUTES} minutes</strong>.
@@ -268,9 +286,10 @@ class PasswordResetService {
 </html>`;
   }
 
-  buildPasswordResetEmailText(firstName, otp) {
+  buildPasswordResetEmailText(firstName, otp, email, frontendUrl) {
     const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
-    return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
+    const linkSection = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}` : '';
+    return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.${linkSection}\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
   }
 }
 

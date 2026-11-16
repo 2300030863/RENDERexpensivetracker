@@ -34,9 +34,11 @@ class EmailOtpService {
 
     // Send email with fallback handling
     // Standard subject and phrasing to trigger Gmail / Apple Mail native "Code Requested / Copy code" action card
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const subject = '[Expense Tracker] Verify your email address';
-    const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
-    const html = this.buildOtpEmailHtml(otp);
+    const linkText = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/register?email=${encodeURIComponent(email)}&code=${otp}` : '';
+    const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.${linkText}\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
+    const html = this.buildOtpEmailHtml(otp, email, frontendUrl);
 
     let delivered = false;
     try {
@@ -226,7 +228,8 @@ class EmailOtpService {
     return !!record;
   }
 
-  buildOtpEmailHtml(otp) {
+  buildOtpEmailHtml(otp, email, frontendUrl) {
+    const autofillUrl = frontendUrl ? `${frontendUrl}/register?email=${encodeURIComponent(email || '')}&code=${otp}` : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -277,17 +280,34 @@ class EmailOtpService {
               </p>
 
               <!-- OTP Display Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 28px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 24px 0 14px;">
                 <tr>
                   <td align="center">
-                    <div style="display: inline-block; background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 36px; text-align: center;">
-                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
+                    <p style="margin: 0 0 8px; font-size: 12px; font-weight: 600; color: #059669; text-transform: uppercase; letter-spacing: 0.5px;">
+                      &#128073; Click or tap code to select &amp; copy
+                    </p>
+                    <div style="display: inline-block; background-color: #f3f4f6; border: 2px dashed #059669; border-radius: 12px; padding: 16px 36px; text-align: center;">
+                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 38px; font-weight: 800; letter-spacing: 8px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
                         ${otp}
                       </code>
                     </div>
                   </td>
                 </tr>
               </table>
+
+              <!-- Copy & Auto-Fill One-Tap Button -->
+              ${autofillUrl ? `
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 0 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="${autofillUrl}"
+                       target="_blank"
+                       style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 32px; border-radius: 10px; box-shadow: 0 4px 10px rgba(5,150,105,0.25); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                      &#128203; Copy &amp; Auto-Fill Code
+                    </a>
+                  </td>
+                </tr>
+              </table>` : ''}
 
               <p style="margin: 0 0 24px; font-size: 13px; color: #6b7280; text-align: center;">
                 This verification code will expire in <strong>${OTP_EXPIRY_MINUTES} minutes</strong>.
