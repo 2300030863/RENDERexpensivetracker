@@ -46,7 +46,7 @@ const dbConfig = {
   password,
   database,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: process.env.DB_CONNECTION_LIMIT ? parseInt(process.env.DB_CONNECTION_LIMIT, 10) : 30,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,

@@ -17,24 +17,19 @@ class AnalyticsService {
     let monthlyTrend = [];
 
     if (isOwner) {
-      totalIncome = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-        fullUser.id, 'INCOME', startDate, endDate
-      );
-      totalExpenses = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
-      categorySpending = await transactionRepository.getCategoryWiseSpending(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
-      monthlyTrend = await transactionRepository.getMonthlyTrend(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
+      [totalIncome, totalExpenses, categorySpending, monthlyTrend] = await Promise.all([
+        transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'INCOME', startDate, endDate),
+        transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'EXPENSE', startDate, endDate),
+        transactionRepository.getCategoryWiseSpending(fullUser.id, 'EXPENSE', startDate, endDate),
+        transactionRepository.getMonthlyTrend(fullUser.id, 'EXPENSE', startDate, endDate)
+      ]);
     } else if (isAdmin) {
       const admin = await adminRepository.findByUsername(fullUser.username);
       if (admin) {
-        const allTransactions = await transactionRepository.findByAdminManagedUsersAndDateRange(
-          fullUser.id, admin.id, startDate, endDate
-        );
+        const [allTransactions, trend] = await Promise.all([
+          transactionRepository.findByAdminManagedUsersAndDateRange(fullUser.id, admin.id, startDate, endDate),
+          transactionRepository.getMonthlyTrendByAdminManagedUsers(fullUser.id, admin.id, 'EXPENSE', startDate, endDate)
+        ]);
 
         totalIncome = allTransactions
           .filter(t => t.type === 'INCOME')
@@ -52,51 +47,30 @@ class AnalyticsService {
             categoryMap.set(catName, (categoryMap.get(catName) || 0) + parseFloat(t.amount || 0));
           });
         categorySpending = Array.from(categoryMap.entries()).map(([k, v]) => [k, v]);
-
-        monthlyTrend = await transactionRepository.getMonthlyTrendByAdminManagedUsers(
-          fullUser.id, admin.id, 'EXPENSE', startDate, endDate
-        );
+        monthlyTrend = trend;
       } else {
-        totalIncome = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-          fullUser.id, 'INCOME', startDate, endDate
-        );
-        totalExpenses = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-          fullUser.id, 'EXPENSE', startDate, endDate
-        );
-        categorySpending = await transactionRepository.getCategoryWiseSpending(
-          fullUser.id, 'EXPENSE', startDate, endDate
-        );
-        monthlyTrend = await transactionRepository.getMonthlyTrend(
-          fullUser.id, 'EXPENSE', startDate, endDate
-        );
+        [totalIncome, totalExpenses, categorySpending, monthlyTrend] = await Promise.all([
+          transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'INCOME', startDate, endDate),
+          transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'EXPENSE', startDate, endDate),
+          transactionRepository.getCategoryWiseSpending(fullUser.id, 'EXPENSE', startDate, endDate),
+          transactionRepository.getMonthlyTrend(fullUser.id, 'EXPENSE', startDate, endDate)
+        ]);
       }
     } else if (isInUserGroup) {
       const groupId = fullUser.user_group_id;
-      totalIncome = await transactionRepository.sumAmountByUserGroupAndTypeAndDateRange(
-        groupId, 'INCOME', startDate, endDate
-      );
-      totalExpenses = await transactionRepository.sumAmountByUserGroupAndTypeAndDateRange(
-        groupId, 'EXPENSE', startDate, endDate
-      );
-      categorySpending = await transactionRepository.getCategoryWiseSpendingByUserGroup(
-        groupId, 'EXPENSE', startDate, endDate
-      );
-      monthlyTrend = await transactionRepository.getMonthlyTrendByUserGroup(
-        groupId, 'EXPENSE', startDate, endDate
-      );
+      [totalIncome, totalExpenses, categorySpending, monthlyTrend] = await Promise.all([
+        transactionRepository.sumAmountByUserGroupAndTypeAndDateRange(groupId, 'INCOME', startDate, endDate),
+        transactionRepository.sumAmountByUserGroupAndTypeAndDateRange(groupId, 'EXPENSE', startDate, endDate),
+        transactionRepository.getCategoryWiseSpendingByUserGroup(groupId, 'EXPENSE', startDate, endDate),
+        transactionRepository.getMonthlyTrendByUserGroup(groupId, 'EXPENSE', startDate, endDate)
+      ]);
     } else {
-      totalIncome = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-        fullUser.id, 'INCOME', startDate, endDate
-      );
-      totalExpenses = await transactionRepository.sumAmountByUserAndTypeAndDateRange(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
-      categorySpending = await transactionRepository.getCategoryWiseSpending(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
-      monthlyTrend = await transactionRepository.getMonthlyTrend(
-        fullUser.id, 'EXPENSE', startDate, endDate
-      );
+      [totalIncome, totalExpenses, categorySpending, monthlyTrend] = await Promise.all([
+        transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'INCOME', startDate, endDate),
+        transactionRepository.sumAmountByUserAndTypeAndDateRange(fullUser.id, 'EXPENSE', startDate, endDate),
+        transactionRepository.getCategoryWiseSpending(fullUser.id, 'EXPENSE', startDate, endDate),
+        transactionRepository.getMonthlyTrend(fullUser.id, 'EXPENSE', startDate, endDate)
+      ]);
     }
 
     return {

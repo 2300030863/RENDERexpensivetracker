@@ -11,6 +11,7 @@ const recurringTransactionRepository = require('../repositories/recurringTransac
 const passwordResetTokenRepository = require('../repositories/passwordResetTokenRepository');
 const occupationService = require('./occupationService');
 const emailCommunicationService = require('./emailCommunicationService');
+const { invalidateUserAuthCache } = require('../middleware/auth');
 
 const isBlocked = (val) => {
   if (val === null || val === undefined) return false;
@@ -59,22 +60,20 @@ class AdminService {
     let users = [];
 
     if (adminUser.role === 'ROLE_OWNER') {
-      users = await userRepository.findAllForOwner('ROLE_OWNER');
+      users = await userRepository.findAllWithGroupInfoForOwner('ROLE_OWNER');
     } else if (adminUser.role === 'ROLE_ADMIN') {
       const admin = await this.getAdminByUser(adminUser);
-      users = await userRepository.findByAdminManagedUsers(admin.id);
+      users = await userRepository.findByAdminManagedUsersWithGroupInfo(admin.id);
     } else {
       throw new Error('Access denied');
     }
 
-    // Map to UserWithGroupDto
-    const dtos = [];
-    for (const u of users) {
-      const userWithGroup = await userRepository.findByIdWithUserGroup(u.id);
+    // Map to UserWithGroupDto in memory - 0 extra DB queries!
+    return users.map(userWithGroup => {
       const isGroupMember = Boolean(userWithGroup.user_group_id);
       const effectiveAdminUsername = userWithGroup.admin_username || userWithGroup.group_admin_username || userWithGroup.direct_admin_username || null;
 
-      dtos.push({
+      return {
         id: userWithGroup.id,
         username: userWithGroup.username,
         email: userWithGroup.email,
@@ -89,10 +88,8 @@ class AdminService {
         userGroupId: userWithGroup.user_group_id || null,
         userGroupName: userWithGroup.group_name || null,
         isGroupMember,
-      });
-    }
-
-    return dtos;
+      };
+    });
   }
 
   async changeUserRole(userId, targetRole) {
@@ -154,6 +151,7 @@ class AdminService {
       }
     }
 
+    invalidateUserAuthCache(userId);
     return updated;
   }
 
@@ -224,6 +222,7 @@ class AdminService {
 
     // 8. Delete user
     await userRepository.delete(userId);
+    invalidateUserAuthCache(userId);
   }
 
   async getUserByIdForAdmin(adminUser, userId) {
@@ -586,6 +585,7 @@ class AdminService {
     }
 
     await userRepository.update(userId, { blocked: true });
+    invalidateUserAuthCache(userId);
   }
 
   async unblockUser(adminUser, userId) {
@@ -601,6 +601,7 @@ class AdminService {
     }
 
     await userRepository.update(userId, { blocked: false });
+    invalidateUserAuthCache(userId);
   }
 }
 

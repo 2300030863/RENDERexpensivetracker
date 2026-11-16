@@ -138,6 +138,50 @@ class UserRepository {
     return normalizeUsers(rows);
   }
 
+  async findAllWithGroupInfoForOwner(ownerRole = 'ROLE_OWNER') {
+    const sql = `
+      SELECT 
+        u.*,
+        ug.name as group_name,
+        ug.admin_id as group_admin_id,
+        COALESCE(a.username, u_admin.username) as admin_username,
+        COALESCE(ga.username, ug_admin.username) as group_admin_username,
+        u_admin.username as direct_admin_username
+      FROM users u
+      LEFT JOIN user_groups ug ON u.user_group_id = ug.id
+      LEFT JOIN admins a ON u.admin_id = a.id
+      LEFT JOIN admins ga ON ug.admin_id = ga.id
+      LEFT JOIN users u_admin ON u.admin_id = u_admin.id
+      LEFT JOIN users ug_admin ON ug.admin_id = ug_admin.id
+      WHERE u.role != ?
+      ORDER BY u.id ASC
+    `;
+    const rows = await query(sql, [ownerRole]);
+    return normalizeUsers(rows);
+  }
+
+  async findByAdminManagedUsersWithGroupInfo(adminId) {
+    const sql = `
+      SELECT DISTINCT 
+        u.*,
+        ug.name as group_name,
+        ug.admin_id as group_admin_id,
+        COALESCE(a.username, u_admin.username) as admin_username,
+        COALESCE(ga.username, ug_admin.username) as group_admin_username,
+        u_admin.username as direct_admin_username
+      FROM users u
+      LEFT JOIN user_groups ug ON u.user_group_id = ug.id
+      LEFT JOIN admins a ON u.admin_id = a.id
+      LEFT JOIN admins ga ON ug.admin_id = ga.id
+      LEFT JOIN users u_admin ON u.admin_id = u_admin.id
+      LEFT JOIN users ug_admin ON ug.admin_id = ug_admin.id
+      WHERE u.admin_id = ? OR ug.admin_id = ?
+      ORDER BY u.id ASC
+    `;
+    const rows = await query(sql, [adminId, adminId]);
+    return normalizeUsers(rows);
+  }
+
   async create(user) {
     const sql = `
       INSERT INTO users (

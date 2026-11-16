@@ -21,17 +21,17 @@ class AuthController {
 
       const user = await userRepository.findByUsernameOrEmail(identifier);
       if (!user) {
-        return res.status(401).send('Invalid username or email, or incorrect password');
+        return res.status(401).json({ error: 'Unauthorized', code: '401', status: 401 });
       }
 
       // Check if blocked (only applies to ROLE_USER)
       if (isBlocked(user.blocked) && user.role === 'ROLE_USER') {
-        return res.status(403).send('Your account has been blocked by the administrator. Please contact support for assistance.');
+        return res.status(403).json({ error: 'Forbidden', code: '403', status: 403 });
       }
 
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
-        return res.status(401).send('Invalid username or email, or incorrect password');
+        return res.status(401).json({ error: 'Unauthorized', code: '401', status: 401 });
       }
 
       const userWithGroup = await userRepository.findByIdWithUserGroup(user.id);
@@ -52,7 +52,7 @@ class AuthController {
       });
     } catch (error) {
       console.error('Login error:', error);
-      return res.status(401).send(`Authentication failed: ${error.message}`);
+      return res.status(401).json({ error: 'Unauthorized', code: '401', status: 401 });
     }
   }
 
