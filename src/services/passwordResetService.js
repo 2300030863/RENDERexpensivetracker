@@ -50,9 +50,9 @@ class PasswordResetService {
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
     const firstName = user.first_name || user.username || 'User';
 
-    const subject = `Your Password Reset Code: ${otp} – Expense Tracker`;
-    const text = this.buildPasswordResetEmailText(firstName, otp, resetUrl);
-    const html = this.buildPasswordResetEmailHtml(firstName, otp, resetUrl);
+    const subject = `${otp} is your Expense Tracker password reset code`;
+    const text = this.buildPasswordResetEmailText(firstName, otp);
+    const html = this.buildPasswordResetEmailHtml(firstName, otp);
 
     let delivered = false;
     try {
@@ -172,12 +172,13 @@ class PasswordResetService {
     return Date.now() <= expiry;
   }
 
-  buildPasswordResetEmailHtml(firstName, otp, resetUrl) {
+  buildPasswordResetEmailHtml(firstName, otp) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta itemprop="otp" content="${otp}" />
   <title>Reset Your Password</title>
 </head>
 <body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -213,15 +214,7 @@ class PasswordResetService {
             </td></tr>
           </table>
 
-          <p style="margin:0 0 20px;color:#94a3b8;font-size:13px;line-height:1.6;">
-            Alternatively, if you prefer to reset your password via direct link, you can click the button below:
-          </p>
-
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="center">
-            <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:14px 32px;border-radius:12px;letter-spacing:0.5px;box-shadow:0 4px 16px rgba(79,70,229,0.4);">&#128273;&nbsp; Reset via Direct Link</a>
-          </td></tr></table>
-
-          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 16px;">
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 16px;margin-bottom:20px;">
             <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.5;">
               &#9888; If you did not request a password reset, please ignore this email. Your password will remain unchanged.
             </p>
@@ -239,8 +232,8 @@ class PasswordResetService {
 </html>`;
   }
 
-  buildPasswordResetEmailText(firstName, otp, resetUrl) {
-    return `Hello ${firstName},\n\nWe received a request to reset your password for Expense Tracker.\n\nYour 6-digit verification code is: ${otp}\n(This code expires in ${OTP_EXPIRY_MINUTES} minutes)\n\nAlternatively, you can reset your password using this link:\n${resetUrl}\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
+  buildPasswordResetEmailText(firstName, otp) {
+    return `Hello ${firstName},\n\nWe received a request to reset your password for Expense Tracker.\n\nYour 6-digit verification code is: ${otp}\n(This code expires in ${OTP_EXPIRY_MINUTES} minutes)\n\nEnter this verification code on the password recovery screen to reset your password.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
   }
 }
 
