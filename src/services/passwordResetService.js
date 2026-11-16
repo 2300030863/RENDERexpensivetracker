@@ -50,7 +50,7 @@ class PasswordResetService {
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
     const firstName = user.first_name || user.username || 'User';
 
-    const subject = `${otp} is your Expense Tracker password reset code`;
+    const subject = '[Expense Tracker] Password reset verification code';
     const text = this.buildPasswordResetEmailText(firstName, otp);
     const html = this.buildPasswordResetEmailHtml(firstName, otp);
 
@@ -179,61 +179,98 @@ class PasswordResetService {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta itemprop="otp" content="${otp}" />
-  <title>Reset Your Password</title>
+  <title>Reset your password</title>
+  <script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "EmailMessage",
+    "description": "Your password reset verification code is ${otp}"
+  }
+  </script>
 </head>
-<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 16px;">
-    <tr><td align="center">
-      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;border-radius:24px;overflow:hidden;background:#1e293b;border:1px solid rgba(255,255,255,0.1);box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
-        <!-- Header Banner -->
-        <tr><td style="background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 50%,#9333ea 100%);padding:36px 32px;text-align:center;">
-          <div style="display:inline-block;width:56px;height:56px;background:rgba(255,255,255,0.2);border-radius:16px;line-height:56px;font-size:26px;color:#ffffff;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-            &#128274;
-          </div>
-          <h1 style="margin:16px 0 0;color:#ffffff;font-size:24px;font-weight:800;letter-spacing:-0.5px;">
-            Password Reset Code
-          </h1>
-          <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:13px;font-weight:500;">Expense Tracker Security Portal</p>
-        </td></tr>
+<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #111827;">
+  <!-- Hidden preheader preview for email clients -->
+  <div style="display: none; max-height: 0px; overflow: hidden; font-size: 1px; line-height: 1px; color: #fff; opacity: 0;">
+    Your one-time verification code is ${otp}. Use this code to reset your password.
+  </div>
 
-        <!-- Main Body -->
-        <tr><td style="padding:36px 36px 28px;">
-          <p style="margin:0 0 4px;color:#94a3b8;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Account Recovery</p>
-          <h2 style="margin:0 0 16px;color:#f8fafc;font-size:20px;font-weight:700;">Hello, ${firstName}</h2>
-          <p style="margin:0 0 24px;color:#cbd5e1;font-size:14px;line-height:1.6;">
-            We received a request to reset your password. Enter the 6-digit verification code below on the password recovery screen:
-          </p>
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color: #f9fafb; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 560px; width: 100%; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);">
+          <!-- Brand Logo Header -->
+          <tr>
+            <td align="center" style="padding: 36px 32px 16px; border-bottom: 1px solid #f3f4f6;">
+              <span style="font-size: 26px; font-weight: 800; color: #059669; letter-spacing: -0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                Expense Tracker
+              </span>
+            </td>
+          </tr>
 
-          <!-- OTP Box -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-            <tr><td align="center" style="background:#0f172a;border:2px solid #6366f1;border-radius:18px;padding:24px 20px;">
-              <span style="font-size:38px;font-weight:800;letter-spacing:10px;color:#a5b4fc;font-family:'Courier New',Courier,monospace;display:inline-block;">${otp}</span>
-              <p style="margin:10px 0 0;font-size:12px;color:#94a3b8;font-weight:600;">
-                &#9201; This code expires in <strong style="color:#e2e8f0;">${OTP_EXPIRY_MINUTES} minutes</strong>
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 36px 36px 28px;">
+              <h1 style="margin: 0 0 16px; font-size: 22px; font-weight: 700; color: #111827; text-align: center;">
+                Reset your password
+              </h1>
+
+              <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #374151;">
+                Hi${firstName ? ' ' + firstName : ''},
               </p>
-            </td></tr>
-          </table>
 
-          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 16px;margin-bottom:20px;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.5;">
-              &#9888; If you did not request a password reset, please ignore this email. Your password will remain unchanged.
-            </p>
-          </div>
-        </td></tr>
+              <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #374151;">
+                We received a request to reset the password for your Expense Tracker account. To proceed, use the following one-time verification code:
+              </p>
 
-        <!-- Footer -->
-        <tr><td style="background:#0f172a;border-top:1px solid rgba(255,255,255,0.06);padding:20px 36px;text-align:center;">
-          <p style="margin:0;color:#64748b;font-size:12px;">© Expense Tracker • Secure Account Services</p>
-        </td></tr>
-      </table>
-    </td></tr>
+              <!-- OTP Display Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 28px 0;">
+                <tr>
+                  <td align="center">
+                    <div style="display: inline-block; background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 36px; text-align: center;">
+                      <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all;">
+                        ${otp}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0 0 24px; font-size: 13px; color: #6b7280; text-align: center;">
+                This verification code will expire in <strong>${OTP_EXPIRY_MINUTES} minutes</strong>.
+              </p>
+
+              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #4b5563;">
+                If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.
+              </p>
+
+              <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #6b7280;">
+                Never share this verification code with anyone. Expense Tracker team will never ask for it.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; border-top: 1px solid #f3f4f6; padding: 24px 36px; text-align: center;">
+              <p style="margin: 0 0 4px; font-size: 12px; font-weight: 600; color: #6b7280;">
+                Expense Tracker • Smart Financial Management
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #9ca3af;">
+                This is an automated security notification.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
 </body>
 </html>`;
   }
 
   buildPasswordResetEmailText(firstName, otp) {
-    return `Hello ${firstName},\n\nWe received a request to reset your password for Expense Tracker.\n\nYour 6-digit verification code is: ${otp}\n(This code expires in ${OTP_EXPIRY_MINUTES} minutes)\n\nEnter this verification code on the password recovery screen to reset your password.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
+    const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
+    return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nTo reset your password, use the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
   }
 }
 
