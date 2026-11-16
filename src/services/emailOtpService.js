@@ -35,7 +35,7 @@ class EmailOtpService {
     // Send email with fallback handling
     // Standard subject and phrasing to trigger Gmail / Apple Mail native "Code Requested / Copy code" action card
     const subject = '[Expense Tracker] Verify your email address';
-    const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nTo verify your email address, use the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
+    const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
     const html = this.buildOtpEmailHtml(otp);
 
     let delivered = false;
@@ -273,7 +273,7 @@ class EmailOtpService {
               </p>
 
               <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #374151;">
-                Thank you for creating an account with Expense Tracker. To complete your registration, use the following one-time verification code:
+                Thank you for creating an account with Expense Tracker. Enter the following one-time verification code:
               </p>
 
               <!-- OTP Display Box -->
@@ -281,9 +281,9 @@ class EmailOtpService {
                 <tr>
                   <td align="center">
                     <div style="display: inline-block; background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 36px; text-align: center;">
-                      <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all;">
+                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
                         ${otp}
-                      </span>
+                      </code>
                     </div>
                   </td>
                 </tr>

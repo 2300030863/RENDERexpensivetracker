@@ -219,7 +219,7 @@ class PasswordResetService {
               </p>
 
               <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #374151;">
-                We received a request to reset the password for your Expense Tracker account. To proceed, use the following one-time verification code:
+                We received a request to reset the password for your Expense Tracker account. Enter the following one-time verification code:
               </p>
 
               <!-- OTP Display Box -->
@@ -227,9 +227,9 @@ class PasswordResetService {
                 <tr>
                   <td align="center">
                     <div style="display: inline-block; background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 36px; text-align: center;">
-                      <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all;">
+                      <code style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #111827; display: inline-block; user-select: all; -webkit-user-select: all; cursor: pointer;">
                         ${otp}
-                      </span>
+                      </code>
                     </div>
                   </td>
                 </tr>
@@ -270,7 +270,7 @@ class PasswordResetService {
 
   buildPasswordResetEmailText(firstName, otp) {
     const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
-    return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nTo reset your password, use the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
+    return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
   }
 }
 
