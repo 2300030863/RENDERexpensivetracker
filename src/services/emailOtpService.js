@@ -55,6 +55,57 @@ class EmailOtpService {
     };
   }
 
+  async sendDeleteAccountOtp(ownerEmail, targetUsername) {
+    if (!ownerEmail) {
+      throw new Error('Owner email is required');
+    }
+
+    // Delete old OTPs for this owner email
+    await emailOtpRepository.deleteByEmail(ownerEmail);
+
+    // Generate 6-digit OTP
+    const otp = this.generateOtp();
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    // Store OTP in database
+    await emailOtpRepository.create(ownerEmail, otp, expiresAt);
+
+    // Send email with confirmation code
+    const subject = `Confirm Account Deletion of "${targetUsername}" – Expense Tracker`;
+    const text = `You have requested to permanently delete user "${targetUsername}".\n\nYour security confirmation OTP code is: ${otp}\n\nThis code expires in ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request this deletion, please do not share this code.`;
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 28px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <h2 style="color: #b91c1c; margin-top: 0; font-size: 20px;">Confirm Account Deletion</h2>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          You requested to permanently delete the user account: <strong style="color: #0f172a;">${targetUsername}</strong>.
+        </p>
+        <p style="color: #334155; font-size: 14px;">Use the following 6-digit confirmation code:</p>
+        <div style="background: #fef2f2; border: 2px dashed #fca5a5; padding: 16px; text-align: center; border-radius: 12px; margin: 20px 0;">
+          <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #b91c1c; font-family: monospace;">${otp}</span>
+        </div>
+        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">
+          This code expires in <strong>${OTP_EXPIRY_MINUTES} minutes</strong>. If you did not initiate this deletion, please do not share this code.
+        </p>
+      </div>
+    `;
+
+    let delivered = false;
+    try {
+      const mailResult = await sendMail({ to: ownerEmail, subject, text, html });
+      delivered = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
+      console.log(`[EmailOtpService] Delete OTP processed for ${ownerEmail} (Delivered: ${delivered})`);
+    } catch (err) {
+      console.warn(`[EmailOtpService] Mail delivery error for ${ownerEmail}:`, err.message);
+      delivered = false;
+    }
+
+    return {
+      success: true,
+      email: ownerEmail,
+      delivered,
+    };
+  }
+
   async verifyOtp(email, otp) {
     const record = await emailOtpRepository.findLatestUnverifiedByEmail(email);
     if (!record) {

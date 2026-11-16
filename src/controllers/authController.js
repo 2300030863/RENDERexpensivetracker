@@ -4,6 +4,12 @@ const authService = require('../services/authService');
 const emailOtpService = require('../services/emailOtpService');
 const { generateToken, decodeToken } = require('../utils/jwt');
 
+const isBlocked = (val) => {
+  if (val === null || val === undefined) return false;
+  if (Buffer.isBuffer(val)) return val.length > 0 && val[0] === 1;
+  return val === true || val === 1 || val === '1';
+};
+
 class AuthController {
   async login(req, res) {
     try {
@@ -19,7 +25,7 @@ class AuthController {
       }
 
       // Check if blocked (only applies to ROLE_USER)
-      if (user.blocked && user.role === 'ROLE_USER') {
+      if (isBlocked(user.blocked) && user.role === 'ROLE_USER') {
         return res.status(403).send('Your account has been blocked by the administrator. Please contact support for assistance.');
       }
 
@@ -194,7 +200,7 @@ class AuthController {
       const user = await authService.findOrCreateGoogleUser(email, firstName, lastName);
 
       // Check if blocked
-      if (user.blocked && user.role === 'ROLE_USER') {
+      if (isBlocked(user.blocked) && user.role === 'ROLE_USER') {
         return res.status(403).send('Your account has been blocked. Please contact support.');
       }
 

@@ -1,6 +1,12 @@
 const { verifyToken } = require('../utils/jwt');
 const userRepository = require('../repositories/userRepository');
 
+const isBlocked = (val) => {
+  if (val === null || val === undefined) return false;
+  if (Buffer.isBuffer(val)) return val.length > 0 && val[0] === 1;
+  return val === true || val === 1 || val === '1';
+};
+
 async function authenticate(req, res, next) {
   // Pass through preflight
   if (req.method === 'OPTIONS') {
@@ -36,7 +42,7 @@ async function authenticate(req, res, next) {
     }
 
     // Check if user is blocked (applies only to ROLE_USER)
-    if (user.blocked && user.role === 'ROLE_USER') {
+    if (isBlocked(user.blocked) && user.role === 'ROLE_USER') {
       return res.status(403).json({
         error: 'Your account has been blocked by the administrator. Please contact support for assistance.',
       });

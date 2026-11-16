@@ -1,33 +1,62 @@
 const { query, execute } = require('../config/database');
 
+function normalizeUser(user) {
+  if (!user) return null;
+  if (user.blocked !== undefined) {
+    if (Buffer.isBuffer(user.blocked)) {
+      user.blocked = user.blocked.length > 0 && user.blocked[0] === 1;
+    } else {
+      user.blocked = Boolean(user.blocked === true || user.blocked === 1 || user.blocked === '1');
+    }
+  }
+  if (user.is_oauth_user !== undefined) {
+    if (Buffer.isBuffer(user.is_oauth_user)) {
+      user.is_oauth_user = user.is_oauth_user.length > 0 && user.is_oauth_user[0] === 1;
+    } else {
+      user.is_oauth_user = Boolean(user.is_oauth_user === true || user.is_oauth_user === 1 || user.is_oauth_user === '1');
+    }
+  }
+  return user;
+}
+
+function normalizeUsers(users) {
+  if (!Array.isArray(users)) return [];
+  return users.map(normalizeUser);
+}
+
 class UserRepository {
   async findById(id) {
     const rows = await query('SELECT * FROM users WHERE id = ?', [id]);
-    return rows[0] || null;
+    return normalizeUser(rows[0]) || null;
   }
 
   async findByIdWithUserGroup(id) {
     const sql = `
       SELECT u.*, 
              ug.id as group_id, ug.name as group_name, ug.description as group_description, ug.admin_id as group_admin_id,
-             a.id as direct_admin_id, a.username as direct_admin_username
+             a.id as direct_admin_id, a.username as direct_admin_username,
+             ga.username as group_admin_username,
+             COALESCE(ga.username, a.username, ug_admin.username, u_admin.username) as admin_username
       FROM users u
       LEFT JOIN user_groups ug ON u.user_group_id = ug.id
       LEFT JOIN admins a ON u.admin_id = a.id
+      LEFT JOIN admins ga ON ug.admin_id = ga.id
+      LEFT JOIN users u_admin ON u.admin_id = u_admin.id
+      LEFT JOIN users ug_admin ON ug.admin_id = ug_admin.id
       WHERE u.id = ?
     `;
     const rows = await query(sql, [id]);
-    return rows[0] || null;
+    return normalizeUser(rows[0]) || null;
   }
 
   async findByUsername(username) {
     const rows = await query('SELECT * FROM users WHERE username = ?', [username]);
-    return rows[0] || null;
+    return normalizeUser(rows[0]) || null;
   }
 
   async findByEmail(email) {
     const rows = await query('SELECT * FROM users WHERE email = ?', [email]);
-    return rows[0] || null;
+    return normalizeUser(rows[0]) || null;
   }
 
   async findByUsernameOrEmail(identifier) {
@@ -37,7 +66,7 @@ class UserRepository {
       'SELECT * FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) LIMIT 1',
       [trimmed, trimmed]
     );
-    return rows[0] || null;
+    return normalizeUser(rows[0]) || null;
   }
 
   async existsByUsername(username) {
@@ -51,11 +80,13 @@ class UserRepository {
   }
 
   async findByRole(role) {
-    return await query('SELECT * FROM users WHERE role = ? ORDER BY id ASC', [role]);
+    const rows = await query('SELECT * FROM users WHERE role = ? ORDER BY id ASC', [role]);
+    return normalizeUsers(rows);
   }
 
   async findByAdmin(adminId) {
-    return await query('SELECT * FROM users WHERE admin_id = ? ORDER BY id ASC', [adminId]);
+    const rows = await query('SELECT * FROM users WHERE admin_id = ? ORDER BY id ASC', [adminId]);
+    return normalizeUsers(rows);
   }
 
   async findByAdminManagedUsers(adminId) {
@@ -66,11 +97,13 @@ class UserRepository {
       WHERE u.admin_id = ? OR ug.admin_id = ?
       ORDER BY u.id ASC
     `;
-    return await query(sql, [adminId, adminId]);
+    const rows = await query(sql, [adminId, adminId]);
+    return normalizeUsers(rows);
   }
 
   async findByUserGroupId(groupId) {
-    return await query('SELECT * FROM users WHERE user_group_id = ? ORDER BY id ASC', [groupId]);
+    const rows = await query('SELECT * FROM users WHERE user_group_id = ? ORDER BY id ASC', [groupId]);
+    return normalizeUsers(rows);
   }
 
   async findByUserGroupAdminId(adminId) {
@@ -81,7 +114,8 @@ class UserRepository {
       WHERE ug.admin_id = ?
       ORDER BY u.id ASC
     `;
-    return await query(sql, [adminId]);
+    const rows = await query(sql, [adminId]);
+    return normalizeUsers(rows);
   }
 
   async findAllExcludingOwnersAndGroupMembers(ownerRole = 'ROLE_OWNER', adminRole = 'ROLE_ADMIN') {
@@ -90,7 +124,18 @@ class UserRepository {
       WHERE role != ? AND (role = ? OR user_group_id IS NULL)
       ORDER BY id ASC
     `;
-    return await query(sql, [ownerRole, adminRole]);
+    const rows = await query(sql, [ownerRole, adminRole]);
+    return normalizeUsers(rows);
+  }
+
+  async findAllForOwner(ownerRole = 'ROLE_OWNER') {
+    const sql = `
+      SELECT * FROM users 
+      WHERE role != ?
+      ORDER BY id ASC
+    `;
+    const rows = await query(sql, [ownerRole]);
+    return normalizeUsers(rows);
   }
 
   async create(user) {

@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const { execute } = require('../config/database');
 const userRepository = require('../repositories/userRepository');
 const adminRepository = require('../repositories/adminRepository');
 const userGroupRepository = require('../repositories/userGroupRepository');
@@ -10,6 +11,12 @@ const recurringTransactionRepository = require('../repositories/recurringTransac
 const passwordResetTokenRepository = require('../repositories/passwordResetTokenRepository');
 const occupationService = require('./occupationService');
 const emailCommunicationService = require('./emailCommunicationService');
+
+const isBlocked = (val) => {
+  if (val === null || val === undefined) return false;
+  if (Buffer.isBuffer(val)) return val.length > 0 && val[0] === 1;
+  return val === true || val === 1 || val === '1';
+};
 
 class AdminService {
   async getAdminByUser(adminUser) {
@@ -52,10 +59,10 @@ class AdminService {
     let users = [];
 
     if (adminUser.role === 'ROLE_OWNER') {
-      users = await userRepository.findAllExcludingOwnersAndGroupMembers('ROLE_OWNER', 'ROLE_ADMIN');
+      users = await userRepository.findAllForOwner('ROLE_OWNER');
     } else if (adminUser.role === 'ROLE_ADMIN') {
       const admin = await this.getAdminByUser(adminUser);
-      users = await userRepository.findByAdmin(admin.id);
+      users = await userRepository.findByAdminManagedUsers(admin.id);
     } else {
       throw new Error('Access denied');
     }
@@ -64,6 +71,9 @@ class AdminService {
     const dtos = [];
     for (const u of users) {
       const userWithGroup = await userRepository.findByIdWithUserGroup(u.id);
+      const isGroupMember = Boolean(userWithGroup.user_group_id);
+      const effectiveAdminUsername = userWithGroup.admin_username || userWithGroup.group_admin_username || userWithGroup.direct_admin_username || null;
+
       dtos.push({
         id: userWithGroup.id,
         username: userWithGroup.username,
@@ -71,12 +81,14 @@ class AdminService {
         firstName: userWithGroup.first_name,
         lastName: userWithGroup.last_name,
         role: userWithGroup.role,
+        blocked: isBlocked(userWithGroup.blocked),
         createdAt: userWithGroup.created_at,
         updatedAt: userWithGroup.updated_at,
-        adminId: userWithGroup.admin_id || null,
-        adminUsername: userWithGroup.direct_admin_username || null,
+        adminId: userWithGroup.group_admin_id || userWithGroup.admin_id || null,
+        adminUsername: effectiveAdminUsername,
         userGroupId: userWithGroup.user_group_id || null,
         userGroupName: userWithGroup.group_name || null,
+        isGroupMember,
       });
     }
 
@@ -101,6 +113,32 @@ class AdminService {
     if (targetRole === 'ROLE_ADMIN') {
       fieldsToUpdate.admin_id = null;
       fieldsToUpdate.user_group_id = null;
+
+      let admin = await adminRepository.findByUsername(user.username);
+      if (!admin) {
+        admin = await adminRepository.findByEmail(user.email);
+      }
+      if (!admin) {
+        await adminRepository.create({
+          username: user.username,
+          email: user.email,
+          password: user.password,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          isActive: true,
+        });
+      } else {
+        await execute('UPDATE admins SET is_active = 1 WHERE id = ?', [admin.id]);
+      }
+    } else if (targetRole === 'ROLE_USER') {
+      // When demoted to Member (ROLE_USER), ensure user is unblocked
+      fieldsToUpdate.blocked = false;
+
+      // Inactivate any admin entry if it exists
+      const admin = (await adminRepository.findByUsername(user.username)) || (await adminRepository.findByEmail(user.email));
+      if (admin) {
+        await execute('UPDATE admins SET is_active = 0 WHERE id = ?', [admin.id]);
+      }
     }
 
     const updated = await userRepository.update(userId, fieldsToUpdate);
@@ -148,8 +186,12 @@ class AdminService {
       throw new Error('User not found or access denied');
     }
 
-    if (userOpt.role === 'ROLE_ADMIN' || userOpt.role === 'ROLE_OWNER') {
-      throw new Error('Cannot delete admin or owner users');
+    if (userOpt.role === 'ROLE_OWNER' || userOpt.id === adminUser.id) {
+      throw new Error('Cannot delete owner account');
+    }
+
+    if (userOpt.role === 'ROLE_ADMIN' && adminUser.role !== 'ROLE_OWNER') {
+      throw new Error('Only OWNER can delete admin accounts');
     }
 
     // 1. Delete password reset tokens
@@ -170,7 +212,17 @@ class AdminService {
     // 6. Delete accounts
     await accountRepository.deleteByUserId(userId);
 
-    // 7. Delete user
+    // 7. If user is an admin, delete/unlink admin references
+    if (userOpt.role === 'ROLE_ADMIN') {
+      const admin = (await adminRepository.findByUsername(userOpt.username)) || (await adminRepository.findByEmail(userOpt.email));
+      if (admin) {
+        await execute('UPDATE users SET admin_id = null WHERE admin_id = ?', [admin.id]);
+        await execute('UPDATE user_groups SET admin_id = null WHERE admin_id = ?', [admin.id]);
+        await adminRepository.delete(admin.id);
+      }
+    }
+
+    // 8. Delete user
     await userRepository.delete(userId);
   }
 
@@ -521,11 +573,15 @@ class AdminService {
     const user = await this.getUserByIdForAdmin(adminUser, userId);
     if (!user) throw new Error('User not found or access denied');
 
-    if (user.role === 'ROLE_ADMIN' || user.role === 'ROLE_OWNER') {
-      throw new Error('Cannot block admin or owner users');
+    if (user.role === 'ROLE_OWNER' || user.id === adminUser.id) {
+      throw new Error('Cannot block owner account');
     }
 
-    if (user.blocked) {
+    if (user.role === 'ROLE_ADMIN' && adminUser.role !== 'ROLE_OWNER') {
+      throw new Error('Only OWNER can block admin accounts');
+    }
+
+    if (isBlocked(user.blocked)) {
       throw new Error('User is already blocked');
     }
 
@@ -536,7 +592,11 @@ class AdminService {
     const user = await this.getUserByIdForAdmin(adminUser, userId);
     if (!user) throw new Error('User not found or access denied');
 
-    if (!user.blocked) {
+    if (user.role === 'ROLE_OWNER' || user.id === adminUser.id) {
+      throw new Error('Cannot unblock owner account');
+    }
+
+    if (!isBlocked(user.blocked)) {
       throw new Error('User is not blocked');
     }
 

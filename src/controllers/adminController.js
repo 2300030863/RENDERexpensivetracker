@@ -1,6 +1,8 @@
 const adminService = require('../services/adminService');
 const emailCommunicationService = require('../services/emailCommunicationService');
 const categoryService = require('../services/categoryService');
+const emailOtpService = require('../services/emailOtpService');
+const userRepository = require('../repositories/userRepository');
 
 class AdminController {
   async getDashboardStats(req, res, next) {
@@ -73,13 +75,75 @@ class AdminController {
     }
   }
 
+  async requestDeleteOtp(req, res, next) {
+    try {
+      if (req.user.role !== 'ROLE_OWNER') {
+        return res.status(403).json({ error: 'Only OWNER can request account deletion OTP' });
+      }
+
+      const userId = req.body?.userId || req.params?.userId;
+      if (!userId) {
+        return res.status(400).json({ error: 'Target User ID is required' });
+      }
+
+      const targetUser = await userRepository.findById(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: 'Target user not found' });
+      }
+
+      if (targetUser.role === 'ROLE_OWNER' || targetUser.id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot delete owner account' });
+      }
+
+      const result = await emailOtpService.sendDeleteAccountOtp(req.user.email, targetUser.username);
+      res.json({
+        success: true,
+        message: `Security code sent to ${req.user.email}`,
+        delivered: result.delivered,
+      });
+    } catch (err) {
+      console.error('requestDeleteOtp error:', err);
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   async deleteUser(req, res, next) {
     try {
+      if (req.user.role !== 'ROLE_OWNER') {
+        return res.status(403).json({ error: 'Only OWNER can delete user accounts' });
+      }
+
       const userId = req.params.userId || req.params.id;
+      const targetUser = await userRepository.findById(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (targetUser.role === 'ROLE_OWNER' || targetUser.id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot delete owner account' });
+      }
+
+      // Check confirmation username
+      const confirmationUsername = req.body?.confirmationUsername || req.headers['x-confirmation-username'] || req.query?.confirmationUsername;
+      if (!confirmationUsername || confirmationUsername.trim() !== targetUser.username) {
+        return res.status(400).json({
+          error: `Username confirmation mismatch. Please type exact username "${targetUser.username}" to confirm deletion.`,
+        });
+      }
+
+      // Check OTP
+      const otp = req.body?.otp || req.headers['x-delete-otp'] || req.query?.otp;
+      if (!otp || !otp.toString().trim()) {
+        return res.status(400).json({ error: 'Verification OTP is required to delete this account.' });
+      }
+
+      await emailOtpService.verifyOtp(req.user.email, otp.toString().trim());
+
       await adminService.deleteUserForAdmin(req.user, userId);
-      res.json({ message: 'User deleted successfully' });
+      res.json({ success: true, message: `Account "${targetUser.username}" has been permanently deleted.` });
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('deleteUser error:', err);
+      res.status(400).json({ error: err.message });
     }
   }
 

@@ -50,6 +50,13 @@ const dbConfig = {
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
+  typeCast: function (field, next) {
+    if (field.type === 'BIT' && field.length === 1) {
+      const bytes = field.buffer();
+      return bytes !== null && bytes.length > 0 ? bytes[0] === 1 : false;
+    }
+    return next();
+  },
 };
 
 if (
