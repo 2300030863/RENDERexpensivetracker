@@ -46,7 +46,7 @@ class PasswordResetService {
     await passwordResetTokenRepository.create(token, user.id, tokenExpiryDate);
 
     // 3. Send email with OTP prominently displayed and reset link
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost') ? process.env.FRONTEND_URL : 'https://experiencetracker.vercel.app').replace(/\/$/, '');
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
     const firstName = user.first_name || user.username || 'User';
 

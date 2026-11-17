@@ -34,7 +34,7 @@ class EmailOtpService {
 
     // Send email with fallback handling
     // Standard subject and phrasing to trigger Gmail / Apple Mail native "Code Requested / Copy code" action card
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost') ? process.env.FRONTEND_URL : 'https://experiencetracker.vercel.app').replace(/\/$/, '');
     const subject = '[Expense Tracker] Verify your email address';
     const linkText = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/register?email=${encodeURIComponent(email)}&code=${otp}` : '';
     const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.${linkText}\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
