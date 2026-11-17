@@ -37,6 +37,7 @@ class PasswordResetService {
     await emailOtpRepository.deleteByEmail(user.email);
     const otp = this.generateOtp();
     const otpExpiryDate = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+    const expTimestamp = otpExpiryDate.getTime();
     await emailOtpRepository.create(user.email, otp, otpExpiryDate);
 
     // 2. Also create reset token in case the user prefers clicking the email link
@@ -51,8 +52,8 @@ class PasswordResetService {
     const firstName = user.first_name || user.username || 'User';
 
     const subject = '[Expense Tracker] Password reset verification code';
-    const text = this.buildPasswordResetEmailText(firstName, otp, user.email, frontendUrl);
-    const html = this.buildPasswordResetEmailHtml(firstName, otp, user.email, frontendUrl);
+    const text = this.buildPasswordResetEmailText(firstName, otp, user.email, frontendUrl, expTimestamp);
+    const html = this.buildPasswordResetEmailHtml(firstName, otp, user.email, frontendUrl, expTimestamp);
 
     let delivered = false;
     try {
@@ -69,6 +70,9 @@ class PasswordResetService {
       email: user.email,
       username: user.username,
       delivered,
+      expiresAt: otpExpiryDate.toISOString(),
+      expiresAtTimestamp: expTimestamp,
+      expirySeconds: OTP_EXPIRY_MINUTES * 60,
       devOtp: !delivered ? otp : undefined,
     };
   }
@@ -172,8 +176,9 @@ class PasswordResetService {
     return Date.now() <= expiry;
   }
 
-  buildPasswordResetEmailHtml(firstName, otp, email, frontendUrl) {
-    const autofillUrl = frontendUrl ? `${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}` : '';
+  buildPasswordResetEmailHtml(firstName, otp, email, frontendUrl, expTimestamp) {
+    const expParam = expTimestamp ? `&exp=${expTimestamp}` : '';
+    const autofillUrl = frontendUrl ? `${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}${expParam}` : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -286,9 +291,10 @@ class PasswordResetService {
 </html>`;
   }
 
-  buildPasswordResetEmailText(firstName, otp, email, frontendUrl) {
+  buildPasswordResetEmailText(firstName, otp, email, frontendUrl, expTimestamp) {
     const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
-    const linkSection = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}` : '';
+    const expParam = expTimestamp ? `&exp=${expTimestamp}` : '';
+    const linkSection = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/forgot-password?identifier=${encodeURIComponent(email || '')}&code=${otp}${expParam}` : '';
     return `${greeting}\n\nWe received a request to reset your password for your Expense Tracker account.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.${linkSection}\n\nIf you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.\n\nBest regards,\nExpense Tracker Team`;
   }
 }

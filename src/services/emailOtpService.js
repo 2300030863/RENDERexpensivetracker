@@ -28,6 +28,7 @@ class EmailOtpService {
     // Generate 6-digit OTP
     const otp = this.generateOtp();
     const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+    const expTimestamp = expiresAt.getTime();
 
     // Store OTP in database
     await emailOtpRepository.create(email, otp, expiresAt);
@@ -36,9 +37,9 @@ class EmailOtpService {
     // Standard subject and phrasing to trigger Gmail / Apple Mail native "Code Requested / Copy code" action card
     const frontendUrl = (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost') ? process.env.FRONTEND_URL : 'https://experiencetracker.vercel.app').replace(/\/$/, '');
     const subject = '[Expense Tracker] Verify your email address';
-    const linkText = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/register?email=${encodeURIComponent(email)}&code=${otp}` : '';
+    const linkText = frontendUrl ? `\n\nOr click here to copy & auto-fill the code automatically:\n${frontendUrl}/register?email=${encodeURIComponent(email)}&code=${otp}&exp=${expTimestamp}` : '';
     const text = `Hi,\n\nThank you for signing up with Expense Tracker.\n\nEnter the following one-time verification code:\n\n${otp}\n\nThis verification code will expire in ${OTP_EXPIRY_MINUTES} minutes.${linkText}\n\nNever share this verification code with anyone. If you did not request this code, please ignore this email.\n\nBest regards,\nExpense Tracker Team`;
-    const html = this.buildOtpEmailHtml(otp, email, frontendUrl);
+    const html = this.buildOtpEmailHtml(otp, email, frontendUrl, expTimestamp);
 
     let delivered = false;
     try {
@@ -54,6 +55,9 @@ class EmailOtpService {
       success: true,
       email,
       delivered,
+      expiresAt: expiresAt.toISOString(),
+      expiresAtTimestamp: expTimestamp,
+      expirySeconds: OTP_EXPIRY_MINUTES * 60,
       devOtp: !delivered ? otp : undefined,
     };
   }
@@ -228,8 +232,9 @@ class EmailOtpService {
     return !!record;
   }
 
-  buildOtpEmailHtml(otp, email, frontendUrl) {
-    const autofillUrl = frontendUrl ? `${frontendUrl}/register?email=${encodeURIComponent(email || '')}&code=${otp}` : '';
+  buildOtpEmailHtml(otp, email, frontendUrl, expTimestamp) {
+    const expParam = expTimestamp ? `&exp=${expTimestamp}` : '';
+    const autofillUrl = frontendUrl ? `${frontendUrl}/register?email=${encodeURIComponent(email || '')}&code=${otp}${expParam}` : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
