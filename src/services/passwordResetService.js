@@ -84,7 +84,7 @@ class PasswordResetService {
 
   async getOtpStatus(identifier) {
     if (!identifier) {
-      return { active: false, expired: true, remainingSeconds: 0 };
+      return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' };
     }
 
     const trimmed = identifier.trim();
@@ -92,21 +92,39 @@ class PasswordResetService {
     if (!user) user = await userRepository.findByEmail(trimmed);
     if (!user) user = await userRepository.findByUsername(trimmed);
     if (!user) {
-      return { active: false, expired: true, remainingSeconds: 0 };
+      return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' };
     }
 
     const record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
     if (!record) {
-      return { active: false, expired: true, remainingSeconds: 0, email: user.email, username: user.username };
+      return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED', email: user.email, username: user.username };
     }
 
     const expiry = new Date(record.expires_at).getTime();
     const remainingSeconds = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
     const isExpired = remainingSeconds <= 0;
 
+    if (isExpired) {
+      // Purge expired OTP record from database so it cannot be used
+      try {
+        await emailOtpRepository.deleteByEmail(user.email);
+      } catch (err) {
+        console.warn(`[PasswordResetService] Failed to purge expired OTP:`, err.message);
+      }
+      return {
+        active: false,
+        expired: true,
+        remainingSeconds: 0,
+        code: 'OTP_EXPIRED',
+        error: 'Error Code: OTP_EXPIRED',
+        email: user.email,
+        username: user.username,
+      };
+    }
+
     return {
-      active: !isExpired,
-      expired: isExpired,
+      active: true,
+      expired: false,
       remainingSeconds,
       expiresAt: record.expires_at,
       expiresAtTimestamp: expiry,
@@ -117,7 +135,10 @@ class PasswordResetService {
 
   async resetPasswordWithOtp(emailOrIdentifier, otp, newPassword) {
     if (!emailOrIdentifier || !otp || !newPassword) {
-      throw new Error('Email/Username, OTP, and new password are required');
+      const err = new Error('Error Code: OTP_REQUIRED');
+      err.code = 'OTP_REQUIRED';
+      err.status = 400;
+      throw err;
     }
 
     const trimmedIdentifier = emailOrIdentifier.trim();
@@ -130,23 +151,37 @@ class PasswordResetService {
     }
 
     if (!user) {
-      throw new Error('User not found');
+      const err = new Error('Error Code: USER_NOT_FOUND');
+      err.code = 'USER_NOT_FOUND';
+      err.status = 404;
+      throw err;
     }
 
     const record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
     if (!record) {
-      throw new Error('No valid OTP code found. Please request a new code.');
+      const err = new Error('Error Code: OTP_EXPIRED');
+      err.code = 'OTP_EXPIRED';
+      err.status = 410;
+      throw err;
+    }
+
+    // Check expiry (5 minutes limit)
+    const expiry = new Date(record.expires_at).getTime();
+    if (Date.now() > expiry) {
+      await emailOtpRepository.deleteByEmail(user.email);
+      const err = new Error('Error Code: OTP_EXPIRED');
+      err.code = 'OTP_EXPIRED';
+      err.status = 410;
+      throw err;
     }
 
     // Check attempts limit (max 5)
     if (record.attempts && record.attempts >= MAX_ATTEMPTS) {
-      throw new Error('Too many failed attempts. This verification code has been locked. Please request a new code.');
-    }
-
-    // Check expiry (5 minutes)
-    const expiry = new Date(record.expires_at).getTime();
-    if (Date.now() > expiry) {
-      throw new Error('Verification code has expired (5-minute limit). Please request a new code.');
+      await emailOtpRepository.deleteByEmail(user.email);
+      const err = new Error('Error Code: OTP_ATTEMPTS_EXCEEDED');
+      err.code = 'OTP_ATTEMPTS_EXCEEDED';
+      err.status = 429;
+      throw err;
     }
 
     // Check match
@@ -154,13 +189,23 @@ class PasswordResetService {
       await emailOtpRepository.incrementAttempts(record.id);
       const remaining = MAX_ATTEMPTS - ((record.attempts || 0) + 1);
       if (remaining <= 0) {
-        throw new Error('Too many incorrect attempts. This code is now invalid. Please request a new code.');
+        await emailOtpRepository.deleteByEmail(user.email);
+        const err = new Error('Error Code: OTP_ATTEMPTS_EXCEEDED');
+        err.code = 'OTP_ATTEMPTS_EXCEEDED';
+        err.status = 429;
+        throw err;
       }
-      throw new Error(`Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
+      const err = new Error('Error Code: OTP_INVALID');
+      err.code = 'OTP_INVALID';
+      err.status = 400;
+      throw err;
     }
 
     if (newPassword.length < 6) {
-      throw new Error('Password must be at least 6 characters long');
+      const err = new Error('Error Code: PASSWORD_TOO_SHORT');
+      err.code = 'PASSWORD_TOO_SHORT';
+      err.status = 400;
+      throw err;
     }
 
     // Hash new password and update user
@@ -178,20 +223,32 @@ class PasswordResetService {
   async resetPassword(token, newPassword) {
     const resetToken = await passwordResetTokenRepository.findByToken(token);
     if (!resetToken) {
-      throw new Error('Invalid password reset token');
+      const err = new Error('Error Code: TOKEN_INVALID');
+      err.code = 'TOKEN_INVALID';
+      err.status = 400;
+      throw err;
     }
 
     if (resetToken.used) {
-      throw new Error('This password reset token has already been used');
+      const err = new Error('Error Code: TOKEN_ALREADY_USED');
+      err.code = 'TOKEN_ALREADY_USED';
+      err.status = 410;
+      throw err;
     }
 
     const expiry = new Date(resetToken.expiry_date).getTime();
     if (Date.now() > expiry) {
-      throw new Error('This password reset token has expired');
+      const err = new Error('Error Code: TOKEN_EXPIRED');
+      err.code = 'TOKEN_EXPIRED';
+      err.status = 410;
+      throw err;
     }
 
     if (newPassword.length < 6) {
-      throw new Error('Password must be at least 6 characters long');
+      const err = new Error('Error Code: PASSWORD_TOO_SHORT');
+      err.code = 'PASSWORD_TOO_SHORT';
+      err.status = 400;
+      throw err;
     }
 
     const salt = await bcrypt.genSalt(10);

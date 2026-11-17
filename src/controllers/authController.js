@@ -80,18 +80,23 @@ class AuthController {
     try {
       const { email, otp } = req.body;
       if (!email || !otp) {
-        return res.status(400).json({ verified: false, message: 'Email and OTP are required' });
+        return res.status(400).json({ verified: false, message: 'Error Code: OTP_REQUIRED', code: 'OTP_REQUIRED' });
       }
 
       const verified = await emailOtpService.verifyOtp(email.trim(), otp.trim());
       if (verified) {
         return res.status(200).json({ verified: true, message: 'Email verified successfully' });
       } else {
-        return res.status(400).json({ verified: false, message: 'Invalid or expired OTP' });
+        return res.status(400).json({ verified: false, message: 'Error Code: OTP_INVALID', code: 'OTP_INVALID' });
       }
     } catch (error) {
       console.error('Verify OTP error:', error);
-      return res.status(400).json({ verified: false, message: error.message });
+      const isExpired = error.code === 'OTP_EXPIRED' || 
+                        error.status === 410 || 
+                        (error.message && (error.message.includes('OTP_EXPIRED') || error.message.includes('expired')));
+      const statusCode = error.status || (isExpired ? 410 : 400);
+      const errorCode = error.code || (isExpired ? 'OTP_EXPIRED' : 'OTP_VERIFICATION_FAILED');
+      return res.status(statusCode).json({ verified: false, message: error.message || `Error Code: ${errorCode}`, code: errorCode });
     }
   }
 

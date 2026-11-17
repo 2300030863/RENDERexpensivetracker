@@ -194,20 +194,35 @@ class EmailOtpService {
     const record = await emailOtpRepository.findLatestUnverifiedByEmail(email);
     if (!record) {
       console.warn(`[EmailOtpService] No OTP found for email: ${email}`);
-      throw new Error('No verification code found. Please request a new code.');
-    }
-
-    // Check attempts limit (max 5)
-    if (record.attempts && record.attempts >= MAX_ATTEMPTS) {
-      console.warn(`[EmailOtpService] Too many failed attempts for email: ${email}`);
-      throw new Error('Too many failed attempts. This verification code has been locked. Please request a new code.');
+      const err = new Error('Error Code: OTP_EXPIRED');
+      err.code = 'OTP_EXPIRED';
+      err.status = 410;
+      throw err;
     }
 
     // Check expiry (5 minutes)
     const expiry = new Date(record.expires_at).getTime();
     if (Date.now() > expiry) {
       console.warn(`[EmailOtpService] OTP expired for email: ${email}`);
-      throw new Error('Verification code has expired (5-minute limit). Please request a new code.');
+      try {
+        await emailOtpRepository.deleteByEmail(email);
+      } catch (_) {}
+      const err = new Error('Error Code: OTP_EXPIRED');
+      err.code = 'OTP_EXPIRED';
+      err.status = 410;
+      throw err;
+    }
+
+    // Check attempts limit (max 5)
+    if (record.attempts && record.attempts >= MAX_ATTEMPTS) {
+      console.warn(`[EmailOtpService] Too many failed attempts for email: ${email}`);
+      try {
+        await emailOtpRepository.deleteByEmail(email);
+      } catch (_) {}
+      const err = new Error('Error Code: OTP_ATTEMPTS_EXCEEDED');
+      err.code = 'OTP_ATTEMPTS_EXCEEDED';
+      err.status = 429;
+      throw err;
     }
 
     // Check match
@@ -215,10 +230,19 @@ class EmailOtpService {
       await emailOtpRepository.incrementAttempts(record.id);
       const remaining = MAX_ATTEMPTS - ((record.attempts || 0) + 1);
       if (remaining <= 0) {
-        throw new Error('Too many incorrect attempts. This code is now invalid. Please request a new code.');
+        try {
+          await emailOtpRepository.deleteByEmail(email);
+        } catch (_) {}
+        const err = new Error('Error Code: OTP_ATTEMPTS_EXCEEDED');
+        err.code = 'OTP_ATTEMPTS_EXCEEDED';
+        err.status = 429;
+        throw err;
       }
       console.warn(`[EmailOtpService] Invalid OTP for email: ${email}, remaining: ${remaining}`);
-      throw new Error(`Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
+      const err = new Error('Error Code: OTP_INVALID');
+      err.code = 'OTP_INVALID';
+      err.status = 400;
+      throw err;
     }
 
     // Mark as verified

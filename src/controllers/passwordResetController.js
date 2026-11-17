@@ -44,7 +44,7 @@ class PasswordResetController {
     try {
       const { token, otp, email, identifier, newPassword } = req.body;
       if (!newPassword) {
-        return res.status(400).json({ error: 'New password is required' });
+        return res.status(400).json({ error: 'Error Code: PASSWORD_REQUIRED', code: 'PASSWORD_REQUIRED' });
       }
 
       if (otp && (email || identifier)) {
@@ -63,10 +63,17 @@ class PasswordResetController {
         });
       }
 
-      return res.status(400).json({ error: 'Reset token or verification code (OTP) with email is required' });
+      return res.status(400).json({ error: 'Error Code: OTP_REQUIRED', code: 'OTP_REQUIRED' });
     } catch (error) {
-      return res.status(400).json({
-        error: error.message,
+      const isExpired = error.code === 'OTP_EXPIRED' || 
+                        error.code === 'TOKEN_EXPIRED' || 
+                        error.status === 410 || 
+                        (error.message && (error.message.includes('OTP_EXPIRED') || error.message.includes('expired')));
+      const statusCode = error.status || (isExpired ? 410 : 400);
+      const errorCode = error.code || (isExpired ? 'OTP_EXPIRED' : 'PASSWORD_RESET_FAILED');
+      return res.status(statusCode).json({
+        error: error.message || `Error Code: ${errorCode}`,
+        code: errorCode,
       });
     }
   }
@@ -75,13 +82,13 @@ class PasswordResetController {
     try {
       const token = req.query.token || req.params.token || req.body?.token;
       if (!token) {
-        return res.status(400).json({ error: 'Token is required' });
+        return res.status(400).json({ error: 'Error Code: TOKEN_REQUIRED', code: 'TOKEN_REQUIRED' });
       }
 
       const isValid = await passwordResetService.validatePasswordResetToken(token);
       return res.status(200).json({ valid: isValid });
     } catch (error) {
-      return res.status(400).json({ valid: false, error: error.message });
+      return res.status(400).json({ valid: false, error: error.message || 'Error Code: TOKEN_INVALID', code: 'TOKEN_INVALID' });
     }
   }
 
@@ -89,13 +96,14 @@ class PasswordResetController {
     try {
       const identifier = (req.query.identifier || req.query.email || req.query.username || '').trim();
       if (!identifier) {
-        return res.status(400).json({ error: 'Identifier is required' });
+        return res.status(400).json({ active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' });
       }
 
       const status = await passwordResetService.getOtpStatus(identifier);
-      return res.status(200).json(status);
+      const statusCode = status.expired ? 410 : 200;
+      return res.status(statusCode).json(status);
     } catch (error) {
-      return res.status(200).json({ active: false, expired: true, remainingSeconds: 0 });
+      return res.status(410).json({ active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' });
     }
   }
 }
