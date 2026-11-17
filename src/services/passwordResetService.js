@@ -82,6 +82,39 @@ class PasswordResetService {
     return await this.createPasswordResetTokenAndOtp(identifier);
   }
 
+  async getOtpStatus(identifier) {
+    if (!identifier) {
+      return { active: false, expired: true, remainingSeconds: 0 };
+    }
+
+    const trimmed = identifier.trim();
+    let user = await userRepository.findByUsernameOrEmail(trimmed);
+    if (!user) user = await userRepository.findByEmail(trimmed);
+    if (!user) user = await userRepository.findByUsername(trimmed);
+    if (!user) {
+      return { active: false, expired: true, remainingSeconds: 0 };
+    }
+
+    const record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
+    if (!record) {
+      return { active: false, expired: true, remainingSeconds: 0, email: user.email, username: user.username };
+    }
+
+    const expiry = new Date(record.expires_at).getTime();
+    const remainingSeconds = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+    const isExpired = remainingSeconds <= 0;
+
+    return {
+      active: !isExpired,
+      expired: isExpired,
+      remainingSeconds,
+      expiresAt: record.expires_at,
+      expiresAtTimestamp: expiry,
+      email: user.email,
+      username: user.username,
+    };
+  }
+
   async resetPasswordWithOtp(emailOrIdentifier, otp, newPassword) {
     if (!emailOrIdentifier || !otp || !newPassword) {
       throw new Error('Email/Username, OTP, and new password are required');

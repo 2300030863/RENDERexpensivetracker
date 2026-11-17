@@ -17,6 +17,7 @@ router.get('/email-test', (req, res, next) => authController.testEmail(req, res,
 router.post('/forgot-password', (req, res, next) => passwordResetController.forgotPassword(req, res, next));
 router.post('/reset-password', (req, res, next) => passwordResetController.resetPassword(req, res, next));
 router.get('/validate-reset-token', (req, res, next) => passwordResetController.validateToken(req, res, next));
+router.get('/otp-status', (req, res, next) => passwordResetController.getOtpStatus(req, res, next));
 
 // Protected auth verification endpoint
 router.get('/verify', authenticateToken, (req, res, next) => authController.verifyToken(req, res, next));

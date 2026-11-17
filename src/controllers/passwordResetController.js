@@ -18,6 +18,9 @@ class PasswordResetController {
         email: result.email,
         username: result.username,
         delivered: result.delivered,
+        expiresAt: result.expiresAt,
+        expiresAtTimestamp: result.expiresAtTimestamp,
+        expirySeconds: result.expirySeconds,
         devOtp: result.devOtp,
       });
     } catch (error) {
@@ -79,6 +82,20 @@ class PasswordResetController {
       return res.status(200).json({ valid: isValid });
     } catch (error) {
       return res.status(400).json({ valid: false, error: error.message });
+    }
+  }
+
+  async getOtpStatus(req, res, next) {
+    try {
+      const identifier = (req.query.identifier || req.query.email || req.query.username || '').trim();
+      if (!identifier) {
+        return res.status(400).json({ error: 'Identifier is required' });
+      }
+
+      const status = await passwordResetService.getOtpStatus(identifier);
+      return res.status(200).json(status);
+    } catch (error) {
+      return res.status(200).json({ active: false, expired: true, remainingSeconds: 0 });
     }
   }
 }
