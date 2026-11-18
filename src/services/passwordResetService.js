@@ -157,7 +157,10 @@ class PasswordResetService {
       throw err;
     }
 
-    const record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
+    let record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
+    if (!record) {
+      record = await emailOtpRepository.findLatestVerifiedByEmail(user.email);
+    }
     if (!record) {
       const err = new Error('Error Code: OTP_EXPIRED');
       err.code = 'OTP_EXPIRED';

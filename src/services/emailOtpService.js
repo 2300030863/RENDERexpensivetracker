@@ -332,7 +332,7 @@ class EmailOtpService {
                     <a href="${autofillUrl}"
                        target="_blank"
                        style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 32px; border-radius: 10px; box-shadow: 0 4px 10px rgba(5,150,105,0.25); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-                      &#128203; Copy &amp; Auto-Fill Code
+                      &#128203; Open Verification Page &amp; Auto-Fill Code
                     </a>
                   </td>
                 </tr>
