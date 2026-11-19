@@ -319,6 +319,47 @@ describe('5. Recurring Transaction Reliability & Idempotency', () => {
       { message: 'Cannot execute inactive recurring transaction' }
     );
   });
+
+  test('Concurrent execution idempotency: executing recurring transaction twice on same day only creates 1 transaction', async () => {
+    const recurringTransactionRepository = require('../src/repositories/recurringTransactionRepository');
+    const today = new Date().toISOString().split('T')[0];
+    
+    const mockRt = {
+      id: 777,
+      amount: 120.00,
+      description: 'Monthly Cloud Subscription',
+      type: 'EXPENSE',
+      recurrence_type: 'MONTHLY',
+      next_due_date: today,
+      is_active: 1,
+      user_id: 101,
+      category_id: 1,
+      account_id: 1,
+    };
+
+    const createdTransactions = [];
+    recurringTransactionRepository.findById = async () => ({ ...mockRt });
+    recurringTransactionRepository.update = async () => {};
+    accountRepository.updateBalance = async () => {};
+    
+    transactionRepository.findByRecurringAndDate = async (rtId, date) => {
+      return createdTransactions.filter(t => t.recurring_transaction_id === rtId && t.transaction_date === date);
+    };
+    
+    transactionRepository.create = async (txn) => {
+      const created = { id: 1000 + createdTransactions.length, ...txn };
+      createdTransactions.push(created);
+      return created;
+    };
+
+    // Simulate two concurrent or consecutive execution triggers
+    await Promise.all([
+      recurringTransactionService.executeRecurringTransaction(777, { id: 101 }),
+      recurringTransactionService.executeRecurringTransaction(777, { id: 101 }),
+    ]);
+
+    assert.equal(createdTransactions.length, 1, 'Only one transaction should be created across concurrent triggers');
+  });
 });
 
 // ==============================================================================
@@ -380,5 +421,112 @@ describe('6. Authentication & JWT Integrity', () => {
     assert.equal(nextCalled, false);
     assert.equal(getStatus(), 401);
     assert.equal(getBody().code, '401');
+  });
+});
+
+// ==============================================================================
+// 7. PASSWORD RESET ABUSE & BOUNDARY DEFENSE
+// ==============================================================================
+describe('7. Password Reset Abuse & Boundary Defense', () => {
+  const passwordResetService = require('../src/services/passwordResetService');
+  const emailOtpRepository = require('../src/repositories/emailOtpRepository');
+  const passwordResetTokenRepository = require('../src/repositories/passwordResetTokenRepository');
+
+  test('Rejects expired OTP at exact expiration boundary with 410 OTP_EXPIRED', async () => {
+    userRepository.findByUsernameOrEmail = async () => ({ id: 101, email: 'victim@example.com', username: 'victim' });
+    emailOtpRepository.findLatestUnverifiedByEmail = async () => ({
+      id: 1,
+      otp: '123456',
+      expires_at: new Date(Date.now() - 1000), // Expired 1 second ago
+      attempts: 0,
+    });
+    emailOtpRepository.findLatestVerifiedByEmail = async () => null;
+    emailOtpRepository.deleteByEmail = async () => {};
+
+    await assert.rejects(
+      async () => {
+        await passwordResetService.resetPasswordWithOtp('victim@example.com', '123456', 'NewPassword123');
+      },
+      { code: 'OTP_EXPIRED', status: 410 }
+    );
+  });
+
+  test('Purges OTP after password reset to strictly prevent replay and OTP reuse attacks', async () => {
+    let otpDeleted = false;
+    let userPasswordUpdated = false;
+
+    userRepository.findByUsernameOrEmail = async () => ({ id: 101, email: 'victim@example.com', username: 'victim' });
+    userRepository.update = async () => { userPasswordUpdated = true; };
+    emailOtpRepository.findLatestUnverifiedByEmail = async () => ({
+      id: 1,
+      otp: '123456',
+      expires_at: new Date(Date.now() + 60000),
+      attempts: 0,
+    });
+    emailOtpRepository.deleteByEmail = async () => { otpDeleted = true; };
+    passwordResetTokenRepository.deleteByUserId = async () => {};
+
+    await passwordResetService.resetPasswordWithOtp('victim@example.com', '123456', 'NewValidPassword123');
+
+    assert.equal(userPasswordUpdated, true);
+    assert.equal(otpDeleted, true, 'OTP must be purged from database upon successful password reset');
+  });
+
+  test('Rejects already-used password reset tokens with 410 TOKEN_ALREADY_USED', async () => {
+    passwordResetTokenRepository.findByToken = async () => ({
+      id: 1,
+      token: 'used-uuid-token',
+      used: 1,
+      expiry_date: new Date(Date.now() + 60000),
+      user_id: 101,
+    });
+
+    await assert.rejects(
+      async () => {
+        await passwordResetService.resetPassword('used-uuid-token', 'NewValidPassword123');
+      },
+      { code: 'TOKEN_ALREADY_USED', status: 410 }
+    );
+  });
+
+  test('Rejects non-existent or forged reset tokens with 400 TOKEN_INVALID', async () => {
+    passwordResetTokenRepository.findByToken = async () => null;
+
+    await assert.rejects(
+      async () => {
+        await passwordResetService.resetPassword('forged-token-xyz', 'NewValidPassword123');
+      },
+      { code: 'TOKEN_INVALID', status: 400 }
+    );
+  });
+
+  test('Rejects unknown user or non-existent email during reset lookup with USER_NOT_FOUND', async () => {
+    userRepository.findByUsernameOrEmail = async () => null;
+    userRepository.findByEmail = async () => null;
+    userRepository.findByUsername = async () => null;
+
+    await assert.rejects(
+      async () => {
+        await passwordResetService.resetPasswordWithOtp('nonexistent@example.com', '123456', 'NewValidPassword123');
+      },
+      { code: 'USER_NOT_FOUND', status: 404 }
+    );
+  });
+
+  test('Enforces minimum 6-character password constraint during reset with PASSWORD_TOO_SHORT', async () => {
+    userRepository.findByUsernameOrEmail = async () => ({ id: 101, email: 'victim@example.com', username: 'victim' });
+    emailOtpRepository.findLatestUnverifiedByEmail = async () => ({
+      id: 1,
+      otp: '123456',
+      expires_at: new Date(Date.now() + 60000),
+      attempts: 0,
+    });
+
+    await assert.rejects(
+      async () => {
+        await passwordResetService.resetPasswordWithOtp('victim@example.com', '123456', '123');
+      },
+      { code: 'PASSWORD_TOO_SHORT', status: 400 }
+    );
   });
 });

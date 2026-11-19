@@ -394,6 +394,11 @@ class TransactionRepository {
     await execute('UPDATE transactions SET user_id = NULL WHERE user_id = ?', [userId]);
   }
 
+  async findByRecurringAndDate(recurringTransactionId, date) {
+    const sql = `SELECT * FROM transactions WHERE recurring_transaction_id = ? AND transaction_date = ?`;
+    return await query(sql, [recurringTransactionId, date]);
+  }
+
   async deleteByUserId(userId) {
     await execute('DELETE FROM transactions WHERE user_id = ?', [userId]);
   }

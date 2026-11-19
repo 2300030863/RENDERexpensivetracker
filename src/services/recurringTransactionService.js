@@ -7,6 +7,10 @@ const adminRepository = require('../repositories/adminRepository');
 const userGroupRepository = require('../repositories/userGroupRepository');
 
 class RecurringTransactionService {
+  constructor() {
+    this._processingLocks = new Set();
+  }
+
   calculateNextDueDate(currentDateStr, recurrenceType) {
     const d = new Date(currentDateStr);
     switch (recurrenceType) {
@@ -196,42 +200,64 @@ class RecurringTransactionService {
   }
 
   async executeRecurringTransaction(id, user) {
-    const rt = await this.getRecurringTransaction(id, user);
-
-    if (!rt.is_active) {
-      throw new Error('Cannot execute inactive recurring transaction');
-    }
-
     const today = new Date().toISOString().split('T')[0];
+    const lockKey = `${id}_${today}`;
 
-    // Create transaction
-    await transactionRepository.create({
-      amount: rt.amount,
-      description: rt.description,
-      type: rt.type,
-      transactionDate: today,
-      notes: rt.notes,
-      userId: rt.user_id,
-      categoryId: rt.category_id,
-      accountId: rt.account_id,
-      recurringTransactionId: rt.id,
-    });
-
-    // Update account balance
-    await accountRepository.updateBalance(rt.account_id, rt.amount, rt.type);
-
-    // Calculate next due date
-    const nextDueDate = this.calculateNextDueDate(rt.next_due_date || today, rt.recurrence_type);
-
-    let isActive = true;
-    if (rt.end_date && nextDueDate > rt.end_date) {
-      isActive = false;
+    // Concurrency lock: Prevent simultaneous asynchronous execution of the same recurring transaction
+    if (this._processingLocks.has(lockKey)) {
+      console.warn(`[RecurringService] Recurring transaction ${id} is currently being processed. Skipping concurrent execution.`);
+      return null;
     }
 
-    await recurringTransactionRepository.update(rt.id, {
-      nextDueDate,
-      isActive,
-    });
+    this._processingLocks.add(lockKey);
+
+    try {
+      const rt = await this.getRecurringTransaction(id, user);
+
+      if (!rt.is_active) {
+        throw new Error('Cannot execute inactive recurring transaction');
+      }
+
+      // Idempotency concurrency guard: Check if an occurrence has already been executed for this recurring schedule today
+      const existing = await transactionRepository.findByRecurringAndDate(rt.id, today);
+      if (existing && existing.length > 0) {
+        console.log(`[RecurringService] Occurrence already processed for recurring ID ${rt.id} on date ${today}. Skipping.`);
+        return existing[0];
+      }
+
+      // Create transaction
+      const newTxn = await transactionRepository.create({
+        amount: rt.amount,
+        description: rt.description,
+        type: rt.type,
+        transactionDate: today,
+        notes: rt.notes,
+        userId: rt.user_id,
+        categoryId: rt.category_id,
+        accountId: rt.account_id,
+        recurringTransactionId: rt.id,
+      });
+
+      // Update account balance
+      await accountRepository.updateBalance(rt.account_id, rt.amount, rt.type);
+
+      // Calculate next due date
+      const nextDueDate = this.calculateNextDueDate(rt.next_due_date || today, rt.recurrence_type);
+
+      let isActive = true;
+      if (rt.end_date && nextDueDate > rt.end_date) {
+        isActive = false;
+      }
+
+      await recurringTransactionRepository.update(rt.id, {
+        nextDueDate,
+        isActive,
+      });
+
+      return newTxn;
+    } finally {
+      this._processingLocks.delete(lockKey);
+    }
   }
 
   async processDueRecurringTransactions() {

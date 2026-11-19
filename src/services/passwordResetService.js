@@ -216,7 +216,8 @@ class PasswordResetService {
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
     await userRepository.update(user.id, { password: hashedPassword });
-    await emailOtpRepository.markVerified(record.id);
+    // Purge OTP and all password reset tokens for this user to guarantee single-use and prevent reuse
+    await emailOtpRepository.deleteByEmail(user.email);
     await passwordResetTokenRepository.deleteByUserId(user.id);
 
     console.log(`[PasswordResetService] Password successfully reset with OTP for user: ${user.username} (${user.email})`);
