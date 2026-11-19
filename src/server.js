@@ -20,8 +20,11 @@ const {
 const app = express();
 const PORT = process.env.PORT || 8086;
 
-// 1. Trust Reverse Proxy (Required for Render, Vercel, and Cloudflare to get accurate client IP)
-app.set('trust proxy', 1);
+// 1. Trust Reverse Proxy (Configurable via TRUST_PROXY; defaults to 1 hop for Render edge)
+const trustProxyVal = process.env.TRUST_PROXY !== undefined 
+  ? (isNaN(process.env.TRUST_PROXY) ? process.env.TRUST_PROXY : parseInt(process.env.TRUST_PROXY, 10))
+  : 1;
+app.set('trust proxy', trustProxyVal);
 
 // 2. Disable framework fingerprinting
 app.disable('x-powered-by');
