@@ -66,6 +66,7 @@ if (
   (datasourceUrl && datasourceUrl.includes('sslMode'))
 ) {
   dbConfig.ssl = {
+    minVersion: 'TLSv1.2',
     rejectUnauthorized: false,
   };
 }
