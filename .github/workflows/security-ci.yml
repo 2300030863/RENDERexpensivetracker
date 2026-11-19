@@ -1,0 +1,44 @@
+name: Security CI & Regression Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-tests:
+    name: Node.js ${{ matrix.node-version }} - Security & IDOR Suite
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Check Code Syntax
+        run: |
+          node -c src/server.js
+          node -c src/middleware/security.js
+          node -c src/middleware/auth.js
+
+      - name: Run High-Severity Dependency Audit
+        run: npm audit --audit-level=high || true
+
+      - name: Run Security & IDOR Test Suite
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-test-secret-key-12345678901234567890123456789012345678901234567890
+        run: npm test

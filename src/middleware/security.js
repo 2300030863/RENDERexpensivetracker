@@ -106,16 +106,18 @@ const apiLimiter = rateLimit({
  * Prevents brute-force dictionary attacks against login, register, and password reset.
  * Rate-limits both per-IP and per-account to mitigate distributed attacks against a single user.
  */
+function authKeyGenerator(req) {
+  const clientIp = ipKeyGenerator(req.ip);
+  const account = (req.body?.username || req.body?.identifier || req.body?.email || '').toLowerCase().trim();
+  return account ? `${clientIp}_${account}` : clientIp;
+}
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 25, // Max 25 attempts per 15 minutes
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const clientIp = ipKeyGenerator(req.ip);
-    const account = (req.body?.username || req.body?.identifier || req.body?.email || '').toLowerCase().trim();
-    return account ? `${clientIp}_${account}` : clientIp;
-  },
+  keyGenerator: authKeyGenerator,
   message: {
     success: false,
     error: 'Too many authentication attempts. For your security, please try again in 15 minutes.',
@@ -128,16 +130,18 @@ const authLimiter = rateLimit({
  * Guards email delivery service from spam abuse and email quota exhaustion.
  * Prevents targeting a single user email across different IPs or burning Brevo quotas.
  */
+function otpKeyGenerator(req) {
+  const clientIp = ipKeyGenerator(req.ip);
+  const email = (req.body?.email || req.body?.identifier || req.query?.email || req.query?.identifier || '').toLowerCase().trim();
+  return email ? `${clientIp}_${email}` : clientIp;
+}
+
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10, // Max 10 OTP requests per 15 minutes
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const clientIp = ipKeyGenerator(req.ip);
-    const email = (req.body?.email || req.body?.identifier || req.query?.email || req.query?.identifier || '').toLowerCase().trim();
-    return email ? `${clientIp}_${email}` : clientIp;
-  },
+  keyGenerator: otpKeyGenerator,
   message: {
     success: false,
     error: 'Too many verification code requests for this account. Please wait 15 minutes before requesting again.',
@@ -151,5 +155,7 @@ module.exports = {
   apiLimiter,
   authLimiter,
   otpLimiter,
+  authKeyGenerator,
+  otpKeyGenerator,
   allowedOrigins,
 };
