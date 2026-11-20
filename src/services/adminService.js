@@ -8,6 +8,8 @@ const categoryRepository = require('../repositories/categoryRepository');
 const budgetRepository = require('../repositories/budgetRepository');
 const accountRepository = require('../repositories/accountRepository');
 const recurringTransactionRepository = require('../repositories/recurringTransactionRepository');
+const { assertPassword, isValidEmail, isValidUsername, normalizeEmail } = require('../utils/validate');
+const { badRequest } = require('../utils/httpError');
 const passwordResetTokenRepository = require('../repositories/passwordResetTokenRepository');
 const occupationService = require('./occupationService');
 const emailCommunicationService = require('./emailCommunicationService');
@@ -156,6 +158,10 @@ class AdminService {
   }
 
   async createUserForAdmin(adminUser, username, email, password, firstName, lastName) {
+    if (!isValidUsername(username)) throw badRequest('Username must be 3-50 characters (letters, numbers, dots, dashes, underscores)');
+    if (!isValidEmail(email)) throw badRequest('Please enter a valid email address');
+    email = normalizeEmail(email);
+    assertPassword(password);
     if (await userRepository.existsByUsername(username)) {
       throw new Error('Username already exists');
     }
@@ -378,6 +384,10 @@ class AdminService {
   }
 
   async createAdminUser(ownerUser, username, email, password, firstName, lastName) {
+    if (!isValidUsername(username)) throw badRequest('Username must be 3-50 characters (letters, numbers, dots, dashes, underscores)');
+    if (!isValidEmail(email)) throw badRequest('Please enter a valid email address');
+    email = normalizeEmail(email);
+    assertPassword(password);
     if (ownerUser.role !== 'ROLE_OWNER') {
       throw new Error('Only OWNER can create admins');
     }

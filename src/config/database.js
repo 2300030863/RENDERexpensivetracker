@@ -3,11 +3,14 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-// Resolve configuration from either Node DB_* or Spring spring.datasource.* properties
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Resolve configuration from either Node DB_* or Spring spring.datasource.* properties.
+// No credentials are hardcoded: everything must come from the environment.
 let host = process.env.DB_HOST;
 let port = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 4000;
-let user = process.env.DB_USER || process.env.SPRING_DATASOURCE_USERNAME || process.env['spring.datasource.username'] || '24W5MntTi8JPMZk.root';
-let password = process.env.DB_PASSWORD || process.env.SPRING_DATASOURCE_PASSWORD || process.env['spring.datasource.password'] || 'p7UBkfxZZfB5H1id';
+let user = process.env.DB_USER || process.env.SPRING_DATASOURCE_USERNAME || process.env['spring.datasource.username'];
+let password = process.env.DB_PASSWORD || process.env.SPRING_DATASOURCE_PASSWORD || process.env['spring.datasource.password'];
 let database = process.env.DB_NAME || 'expense_tracker';
 
 // Parse JDBC / database connection URL if provided
@@ -37,7 +40,16 @@ if (datasourceUrl) {
   }
 }
 
-host = host || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+if (!host || !user || !password) {
+  const message =
+    'Database configuration is missing. Set DB_HOST, DB_USER, DB_PASSWORD (and DB_NAME) ' +
+    'as environment variables - credentials are never read from source code.';
+  if (isProduction) {
+    throw new Error(message);
+  }
+  console.warn(`⚠️  ${message}`);
+  host = host || 'localhost';
+}
 
 const dbConfig = {
   host,
@@ -59,15 +71,14 @@ const dbConfig = {
   },
 };
 
-if (
-  process.env.DB_SSL === 'true' ||
-  process.env.DB_SSL === true ||
-  !process.env.DB_SSL ||
-  (datasourceUrl && datasourceUrl.includes('sslMode'))
-) {
+// TLS is on by default and the server certificate IS verified.
+// Set DB_SSL=false for a local database without TLS, or
+// DB_SSL_REJECT_UNAUTHORIZED=false only as a last resort for a self-signed certificate.
+const sslDisabled = process.env.DB_SSL === 'false';
+if (!sslDisabled) {
   dbConfig.ssl = {
     minVersion: 'TLSv1.2',
-    rejectUnauthorized: false,
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
   };
 }
 
@@ -79,9 +90,7 @@ async function query(sql, params = []) {
     const [results] = await pool.query(sql, params);
     return results;
   } catch (error) {
-    console.error('Database Query Error:', error.message);
-    console.error('Query was:', sql);
-    console.error('Parameters:', params);
+    console.error('Database Query Error:', error.code || '', error.message);
     throw error;
   }
 }
@@ -92,10 +101,32 @@ async function execute(sql, params = []) {
     const [result] = await pool.execute(sql, params);
     return result;
   } catch (error) {
-    console.error('Database Execute Error:', error.message);
-    console.error('Query was:', sql);
-    console.error('Parameters:', params);
+    console.error('Database Execute Error:', error.code || '', error.message);
     throw error;
+  }
+}
+
+/**
+ * Run `work(conn)` inside a single database transaction. The callback gets a
+ * dedicated connection (use conn.query / conn.execute). Commits when it
+ * resolves, rolls back and rethrows when it throws.
+ */
+async function withTransaction(work) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await work(conn);
+    await conn.commit();
+    return result;
+  } catch (error) {
+    try {
+      await conn.rollback();
+    } catch (rollbackError) {
+      console.error('Database rollback failed:', rollbackError.message);
+    }
+    throw error;
+  } finally {
+    conn.release();
   }
 }
 
@@ -369,6 +400,7 @@ module.exports = {
   pool,
   query,
   execute,
+  withTransaction,
   initializeSchema,
 };
 

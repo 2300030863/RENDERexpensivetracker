@@ -24,18 +24,9 @@ class PasswordResetController {
         devOtp: result.devOtp,
       });
     } catch (error) {
-      if (error.message === 'User not found') {
-        return res.status(404).json({
-          error: 'User was not found. Please check your username or email.',
-        });
-      }
-      if (error.message && error.message.includes('Failed to send password reset email')) {
-        return res.status(500).json({
-          error: 'Unable to send email. Please check your email configuration or try again later.',
-        });
-      }
+      console.error('Forgot password error:', error.message);
       return res.status(500).json({
-        error: error.message || 'Failed to process password reset request',
+        error: 'Unable to process the request right now. Please try again later.',
       });
     }
   }
@@ -71,8 +62,10 @@ class PasswordResetController {
                         (error.message && (error.message.includes('OTP_EXPIRED') || error.message.includes('expired')));
       const statusCode = error.status || (isExpired ? 410 : 400);
       const errorCode = error.code || (isExpired ? 'OTP_EXPIRED' : 'PASSWORD_RESET_FAILED');
+      // Only messages we raised ourselves (they carry a status) are shown; anything else is generic.
+      const safeMessage = error.status ? error.message : `Error Code: ${errorCode}`;
       return res.status(statusCode).json({
-        error: error.message || `Error Code: ${errorCode}`,
+        error: safeMessage,
         code: errorCode,
       });
     }
@@ -88,7 +81,7 @@ class PasswordResetController {
       const isValid = await passwordResetService.validatePasswordResetToken(token);
       return res.status(200).json({ valid: isValid });
     } catch (error) {
-      return res.status(400).json({ valid: false, error: error.message || 'Error Code: TOKEN_INVALID', code: 'TOKEN_INVALID' });
+      return res.status(400).json({ valid: false, error: 'Error Code: TOKEN_INVALID', code: 'TOKEN_INVALID' });
     }
   }
 

@@ -50,12 +50,12 @@ class UserRepository {
   }
 
   async findByUsername(username) {
-    const rows = await query('SELECT * FROM users WHERE username = ?', [username]);
+    const rows = await query('SELECT * FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', [username]);
     return normalizeUser(rows[0]) || null;
   }
 
   async findByEmail(email) {
-    const rows = await query('SELECT * FROM users WHERE email = ?', [email]);
+    const rows = await query('SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
     return normalizeUser(rows[0]) || null;
   }
 
@@ -70,12 +70,12 @@ class UserRepository {
   }
 
   async existsByUsername(username) {
-    const rows = await query('SELECT id FROM users WHERE username = ? LIMIT 1', [username]);
+    const rows = await query('SELECT id FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', [username]);
     return rows.length > 0;
   }
 
   async existsByEmail(email) {
-    const rows = await query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    const rows = await query('SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
     return rows.length > 0;
   }
 

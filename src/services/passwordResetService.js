@@ -1,17 +1,37 @@
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const userRepository = require('../repositories/userRepository');
 const passwordResetTokenRepository = require('../repositories/passwordResetTokenRepository');
 const emailOtpRepository = require('../repositories/emailOtpRepository');
 const { sendMail } = require('../config/mailer');
+const { assertPassword } = require('../utils/validate');
 
-const EXPIRATION_HOURS = 24;
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Identifiers that do not belong to any account still get a normal-looking OTP window,
+// so the API cannot be used to discover which usernames/emails are registered.
+const decoyWindows = new Map();
+function decoyExpiry(identifier) {
+  const key = String(identifier).trim().toLowerCase();
+  const now = Date.now();
+  for (const [k, exp] of decoyWindows) {
+    if (exp <= now) decoyWindows.delete(k);
+  }
+  if (decoyWindows.size > 5000) decoyWindows.clear();
+  if (!decoyWindows.has(key)) decoyWindows.set(key, now + OTP_EXPIRY_MINUTES * 60 * 1000);
+  return decoyWindows.get(key);
+}
+function decoyExpiryIfAny(identifier) {
+  return decoyWindows.get(String(identifier).trim().toLowerCase()) || null;
+}
+
+const EXPIRATION_HOURS = 1;
 const OTP_EXPIRY_MINUTES = 5;
 const MAX_ATTEMPTS = 5;
 
 class PasswordResetService {
   generateOtp() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return crypto.randomInt(100000, 1000000).toString();
   }
 
   async createPasswordResetTokenAndOtp(identifier) {
@@ -29,8 +49,18 @@ class PasswordResetService {
     }
 
     if (!user) {
-      console.warn(`[PasswordResetService] User not found for identifier: ${identifier}`);
-      throw new Error('User not found');
+      // Respond exactly like a real request (same shape, same timing window) without sending anything.
+      const fakeExpiry = decoyExpiry(trimmed);
+      return {
+        success: true,
+        email: trimmed,
+        username: trimmed,
+        delivered: true,
+        expiresAt: new Date(fakeExpiry).toISOString(),
+        expiresAtTimestamp: fakeExpiry,
+        expirySeconds: Math.max(0, Math.floor((fakeExpiry - Date.now()) / 1000)),
+        devOtp: undefined,
+      };
     }
 
     // 1. Delete previous OTPs for this email and generate a fresh 6-digit OTP
@@ -42,7 +72,7 @@ class PasswordResetService {
 
     // 2. Also create reset token in case the user prefers clicking the email link
     await passwordResetTokenRepository.deleteByUserId(user.id);
-    const token = uuidv4();
+    const token = crypto.randomBytes(32).toString('hex');
     const tokenExpiryDate = new Date(Date.now() + EXPIRATION_HOURS * 60 * 60 * 1000);
     await passwordResetTokenRepository.create(token, user.id, tokenExpiryDate);
 
@@ -55,25 +85,38 @@ class PasswordResetService {
     const text = this.buildPasswordResetEmailText(firstName, otp, user.email, frontendUrl, expTimestamp);
     const html = this.buildPasswordResetEmailHtml(firstName, otp, user.email, frontendUrl, expTimestamp);
 
-    let delivered = false;
-    try {
-      const mailResult = await sendMail({ to: user.email, subject, text, html });
-      delivered = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
-      console.log(`[PasswordResetService] Password reset OTP processed for: ${user.email} (Delivered: ${delivered})`);
-    } catch (err) {
-      console.error(`[PasswordResetService] Failed to send email to ${user.email}:`, err.message);
-      delivered = false;
+    // Send in the background so response time does not reveal whether the account exists.
+    let delivered = true;
+    let devOtp;
+    if (isProduction) {
+      sendMail({ to: user.email, subject, text, html })
+        .then((mailResult) => {
+          const ok = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
+          console.log(`[PasswordResetService] Password reset email dispatched (delivered: ${ok})`);
+        })
+        .catch((err) => console.error('[PasswordResetService] Failed to send reset email:', err.message));
+    } else {
+      // Development convenience: wait for the mailer and expose the code when it cannot be delivered.
+      try {
+        const mailResult = await sendMail({ to: user.email, subject, text, html });
+        delivered = Boolean(mailResult && mailResult.delivered !== false && !mailResult.simulated);
+      } catch (err) {
+        console.error('[PasswordResetService] Failed to send reset email:', err.message);
+        delivered = false;
+      }
+      devOtp = !delivered ? otp : undefined;
     }
 
     return {
       success: true,
-      email: user.email,
-      username: user.username,
+      // Echo back what the caller typed, never the stored address/username.
+      email: trimmed,
+      username: trimmed,
       delivered,
       expiresAt: otpExpiryDate.toISOString(),
       expiresAtTimestamp: expTimestamp,
       expirySeconds: OTP_EXPIRY_MINUTES * 60,
-      devOtp: !delivered ? otp : undefined,
+      devOtp,
     };
   }
 
@@ -92,12 +135,22 @@ class PasswordResetService {
     if (!user) user = await userRepository.findByEmail(trimmed);
     if (!user) user = await userRepository.findByUsername(trimmed);
     if (!user) {
+      const fakeExpiry = decoyExpiryIfAny(trimmed);
+      if (fakeExpiry && fakeExpiry > Date.now()) {
+        return {
+          active: true,
+          expired: false,
+          remainingSeconds: Math.floor((fakeExpiry - Date.now()) / 1000),
+          expiresAt: new Date(fakeExpiry).toISOString(),
+          expiresAtTimestamp: fakeExpiry,
+        };
+      }
       return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' };
     }
 
     const record = await emailOtpRepository.findLatestUnverifiedByEmail(user.email);
     if (!record) {
-      return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED', email: user.email, username: user.username };
+      return { active: false, expired: true, remainingSeconds: 0, code: 'OTP_EXPIRED', error: 'Error Code: OTP_EXPIRED' };
     }
 
     const expiry = new Date(record.expires_at).getTime();
@@ -117,8 +170,6 @@ class PasswordResetService {
         remainingSeconds: 0,
         code: 'OTP_EXPIRED',
         error: 'Error Code: OTP_EXPIRED',
-        email: user.email,
-        username: user.username,
       };
     }
 
@@ -128,8 +179,6 @@ class PasswordResetService {
       remainingSeconds,
       expiresAt: record.expires_at,
       expiresAtTimestamp: expiry,
-      email: user.email,
-      username: user.username,
     };
   }
 
@@ -151,9 +200,9 @@ class PasswordResetService {
     }
 
     if (!user) {
-      const err = new Error('Error Code: USER_NOT_FOUND');
-      err.code = 'USER_NOT_FOUND';
-      err.status = 404;
+      const err = new Error('Error Code: OTP_INVALID');
+      err.code = 'OTP_INVALID';
+      err.status = 400;
       throw err;
     }
 
@@ -204,12 +253,7 @@ class PasswordResetService {
       throw err;
     }
 
-    if (newPassword.length < 6) {
-      const err = new Error('Error Code: PASSWORD_TOO_SHORT');
-      err.code = 'PASSWORD_TOO_SHORT';
-      err.status = 400;
-      throw err;
-    }
+    assertPassword(newPassword);
 
     // Hash new password and update user
     const salt = await bcrypt.genSalt(10);
@@ -248,12 +292,7 @@ class PasswordResetService {
       throw err;
     }
 
-    if (newPassword.length < 6) {
-      const err = new Error('Error Code: PASSWORD_TOO_SHORT');
-      err.code = 'PASSWORD_TOO_SHORT';
-      err.status = 400;
-      throw err;
-    }
+    assertPassword(newPassword);
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);

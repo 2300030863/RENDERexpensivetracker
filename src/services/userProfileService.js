@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const { assertPassword } = require('../utils/validate');
 const userRepository = require('../repositories/userRepository');
 const adminRepository = require('../repositories/adminRepository');
 const occupationRepository = require('../repositories/occupationRepository');
@@ -75,6 +76,7 @@ class UserProfileService {
   }
 
   async changePassword(user, request) {
+    assertPassword(request && request.newPassword);
     const managedUser = await userRepository.findById(user.id);
     if (!managedUser) throw new Error('User not found');
 

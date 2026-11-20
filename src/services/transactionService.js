@@ -4,6 +4,55 @@ const accountRepository = require('../repositories/accountRepository');
 const recurringTransactionRepository = require('../repositories/recurringTransactionRepository');
 const adminRepository = require('../repositories/adminRepository');
 const userRepository = require('../repositories/userRepository');
+const accountService = require('./accountService');
+const categoryService = require('./categoryService');
+const { badRequest } = require('../utils/httpError');
+const { isValidDateStr, toDateStr } = require('../utils/dateUtil');
+
+const MAX_AMOUNT = 99999999.99; // DECIMAL(10,2)
+
+function parseTransactionInput(request) {
+  const amountRaw = Number(request.amount);
+  if (!Number.isFinite(amountRaw) || amountRaw <= 0) throw badRequest('Amount must be greater than 0');
+  if (amountRaw > MAX_AMOUNT) throw badRequest('Amount is too large');
+
+  const type = typeof request.type === 'string' ? request.type.toUpperCase() : '';
+  if (type !== 'INCOME' && type !== 'EXPENSE') throw badRequest('Type must be INCOME or EXPENSE');
+
+  const description = typeof request.description === 'string' ? request.description.trim() : '';
+  if (!description || description.length > 200) throw badRequest('Description is required (max 200 characters)');
+
+  const dateRaw = request.transactionDate || request.transaction_date;
+  const transactionDate = typeof dateRaw === 'string' ? dateRaw.slice(0, 10) : toDateStr(dateRaw);
+  if (!isValidDateStr(transactionDate)) throw badRequest('A valid transaction date is required');
+
+  const notes = typeof request.notes === 'string' ? request.notes.trim() : '';
+  if (notes.length > 500) throw badRequest('Notes must be 500 characters or fewer');
+
+  return {
+    amount: Math.round(amountRaw * 100) / 100,
+    type,
+    description,
+    transactionDate,
+    notes,
+  };
+}
+
+async function requireVisibleAccount(user, accountId) {
+  const id = Number(accountId);
+  const accounts = await accountService.getAllAccounts(user);
+  const account = accounts.find((a) => Number(a.id) === id);
+  if (!account) throw badRequest('Account not found');
+  return account;
+}
+
+async function requireVisibleCategory(user, categoryId) {
+  const id = Number(categoryId);
+  const categories = await categoryService.getAllCategories(user);
+  const category = categories.find((c) => Number(c.id) === id);
+  if (!category) throw badRequest('Category not found');
+  return category;
+}
 
 class TransactionService {
   async getAllTransactions(user, page = 0, size = 10) {
@@ -104,14 +153,14 @@ class TransactionService {
   }
 
   async createTransaction(user, request) {
-    const category = await categoryRepository.findById(request.categoryId || request.category_id);
-    if (!category) throw new Error('Category not found');
+    const input = parseTransactionInput(request);
 
-    const account = await accountRepository.findById(request.accountId || request.account_id);
-    if (!account) throw new Error('Account not found');
+    // Only categories/accounts this user is allowed to use (blocks posting to other people's accounts)
+    const category = await requireVisibleCategory(user, request.categoryId || request.category_id);
+    const account = await requireVisibleAccount(user, request.accountId || request.account_id);
 
-    const amount = parseFloat(request.amount);
-    const type = request.type;
+    const amount = input.amount;
+    const type = input.type;
 
     // Balance check for EXPENSE
     if (type === 'EXPENSE') {
@@ -128,10 +177,10 @@ class TransactionService {
 
     const created = await transactionRepository.create({
       amount,
-      description: request.description,
+      description: input.description,
       type,
-      transactionDate: request.transactionDate || request.transaction_date,
-      notes: request.notes,
+      transactionDate: input.transactionDate,
+      notes: input.notes,
       userId: user.id,
       categoryId: category.id,
       accountId: account.id,
@@ -164,6 +213,11 @@ class TransactionService {
       throw new Error("Access denied: You don't have permission to update this transaction");
     }
 
+    // Validate everything first so a bad request can never leave balances half-changed
+    const input = parseTransactionInput(request);
+    const newCategory = await requireVisibleCategory(user, request.categoryId || request.category_id);
+    const newAccount = await requireVisibleAccount(user, request.accountId || request.account_id);
+
     // Revert old transaction's impact on old account
     const oldAccount = await accountRepository.findById(transaction.account_id);
     if (oldAccount) {
@@ -171,18 +225,13 @@ class TransactionService {
       await accountRepository.updateBalance(oldAccount.id, transaction.amount, revertType);
     }
 
-    const newCategory = await categoryRepository.findById(request.categoryId || request.category_id);
-    if (!newCategory) throw new Error('Category not found');
+    const amount = input.amount;
+    const type = input.type;
 
-    const newAccount = await accountRepository.findById(request.accountId || request.account_id);
-    if (!newAccount) throw new Error('Account not found');
-
-    const amount = parseFloat(request.amount);
-    const type = request.type;
-
-    // Check balance if EXPENSE
+    // Check balance if EXPENSE (re-read: the revert above may have changed this account's balance)
     if (type === 'EXPENSE') {
-      const updatedBalance = parseFloat(newAccount.balance || 0);
+      const refreshed = await accountRepository.findById(newAccount.id);
+      const updatedBalance = parseFloat((refreshed || newAccount).balance || 0);
       if (updatedBalance < amount) {
         // Rollback old account revert first
         if (oldAccount) {
@@ -194,10 +243,10 @@ class TransactionService {
 
     await transactionRepository.update(id, {
       amount,
-      description: request.description,
+      description: input.description,
       type,
-      transactionDate: request.transactionDate || request.transaction_date,
-      notes: request.notes,
+      transactionDate: input.transactionDate,
+      notes: input.notes,
       categoryId: newCategory.id,
       accountId: newAccount.id,
       recurringTransactionId: request.recurringTransactionId || null,

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const emailOtpRepository = require('../repositories/emailOtpRepository');
 const userRepository = require('../repositories/userRepository');
 const { sendMail } = require('../config/mailer');
@@ -8,9 +9,10 @@ const MAX_ATTEMPTS = 5;
 
 class EmailOtpService {
   generateOtp() {
+    // crypto.randomInt is a CSPRNG; Math.random() is predictable and must not be used for OTPs.
     let otp = '';
     for (let i = 0; i < OTP_LENGTH; i++) {
-      otp += Math.floor(Math.random() * 10);
+      otp += crypto.randomInt(0, 10);
     }
     return otp;
   }

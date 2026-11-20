@@ -1,121 +1,170 @@
 const express = require('express');
+const cors = require('cors');
 const dotenv = require('dotenv');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
-// Load environment variables
+// Load environment variables before anything reads them
 dotenv.config();
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 const { initializeSchema } = require('./config/database');
 const { initializeData } = require('./config/dataInitializer');
-const { initRecurringJobs } = require('./cron/recurringJobs');
+const { initRecurringJobs, runRecurringCatchUp } = require('./cron/recurringJobs');
 const apiRouter = require('./routes');
-const { errorHandler } = require('./middleware/errorHandler');
-const {
-  securityHeaders,
-  corsProtection,
-  apiLimiter,
-  authLimiter,
-  otpLimiter,
-} = require('./middleware/security');
+const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { sanitizeResponse } = require('./middleware/sanitizeResponse');
 
 const app = express();
 const PORT = process.env.PORT || 8086;
 
-// 1. Trust Reverse Proxy (Configurable via TRUST_PROXY; defaults to 1 hop for Render edge)
-const trustProxyVal = process.env.TRUST_PROXY !== undefined 
-  ? (isNaN(process.env.TRUST_PROXY) ? process.env.TRUST_PROXY : parseInt(process.env.TRUST_PROXY, 10))
-  : 1;
-app.set('trust proxy', trustProxyVal);
-
-// 2. Disable framework fingerprinting
+// 1. Trust the reverse proxy (Render/Vercel/Cloudflare) so client IPs are accurate for rate limiting
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// 3. HTTP Security Headers (Helmet)
-app.use(securityHeaders);
+// 2. HTTP security headers. This is a JSON API: it never serves HTML, so a locked-down CSP is safe.
+app.use(
+  helmet({
+    crossOriginOpenerPolicy: false, // Allow the Google OAuth popup to talk back to the frontend
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+      },
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: false,
+    },
+  })
+);
 
-// 4. Strict Cross-Origin Resource Sharing (CORS) Protection
-app.use(corsProtection);
+// 3. Rate limiting
+const rateLimitMessage = (error) => ({ error, status: 429 });
 
-// 5. Restrict incoming request body payload size (DoS & memory protection)
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: rateLimitMessage('Too many requests. Please try again in a few minutes.'),
+});
+app.use(globalLimiter);
 
-// 6. Security Rate Limiters (Application Firewall)
-// Auth Limiter: protects login, register, password reset
-app.use(['/expense-tracker-api/auth/login', '/auth/login'], authLimiter);
-app.use(['/expense-tracker-api/auth/register', '/auth/register'], authLimiter);
-app.use(['/expense-tracker-api/auth/forgot-password', '/auth/forgot-password'], authLimiter);
-app.use(['/expense-tracker-api/auth/reset-password', '/auth/reset-password'], authLimiter);
+// Strict limiter for credential-style endpoints (brute force / credential stuffing / OTP guessing)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+  message: rateLimitMessage('Too many attempts. For your security, please wait 15 minutes and try again.'),
+});
+const authPaths = ['login', 'register', 'send-otp', 'verify-otp', 'forgot-password', 'reset-password', 'google'];
+for (const name of authPaths) {
+  app.use([`/expense-tracker-api/auth/${name}`, `/auth/${name}`], authLimiter);
+}
 
-// OTP Limiter: protects send-otp and verify-otp against email abuse and brute force
-app.use(['/expense-tracker-api/auth/send-otp', '/auth/send-otp'], otpLimiter);
-app.use(['/expense-tracker-api/auth/verify-otp', '/auth/verify-otp'], authLimiter);
-
-// General API Limiter: protects transaction, category, budget, report endpoints
-app.use(['/expense-tracker-api/transactions', '/transactions'], apiLimiter);
-app.use(['/expense-tracker-api/categories', '/categories'], apiLimiter);
-app.use(['/expense-tracker-api/accounts', '/accounts'], apiLimiter);
-app.use(['/expense-tracker-api/budgets', '/budgets'], apiLimiter);
-app.use(['/expense-tracker-api/analytics', '/analytics'], apiLimiter);
-app.use(['/expense-tracker-api/recurring-transactions', '/recurring-transactions'], apiLimiter);
-app.use(['/expense-tracker-api/profile', '/profile'], apiLimiter);
-app.use(['/expense-tracker-api/admin', '/admin'], apiLimiter);
-
-// 7. Request auditing & performance logging
+// Request logging - path only. Query strings can carry tokens, OTP codes and e-mail addresses.
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
     const duration = Date.now() - start;
-    console.log(`[${req.method}] ${req.originalUrl} -> ${res.statusCode} (${duration}ms)`);
+    console.log(`[${req.method}] ${req.path} -> ${res.statusCode} (${duration}ms)`);
   });
   next();
 });
 
-// Root welcome / status route
-app.get('/', (req, res) => {
-  res.json({
-    status: 'UP',
-    message: 'Expense Tracker Backend API (Node.js)',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      actuator: '/actuator/health',
-      apiPrefix: '/expense-tracker-api',
+// 4. CORS: exact origins only. There is no wildcard for *.vercel.app - anyone can host a page there.
+function parseOrigins(value) {
+  return (value || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+}
+
+const allowedOrigins = new Set([
+  'https://experiencetracker.vercel.app',
+  ...parseOrigins(process.env.FRONTEND_URL),
+  ...parseOrigins(process.env.CORS_ORIGINS),
+]);
+
+if (!isProduction) {
+  ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://localhost:3000', 'http://127.0.0.1:5173'].forEach(
+    (o) => allowedOrigins.add(o)
+  );
+}
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Requests without an Origin header (health checks, curl, server-to-server) are not browser CORS requests.
+      if (!origin) return callback(null, true);
+      // Unknown origins simply do not receive CORS headers, so the browser blocks them.
+      return callback(null, allowedOrigins.has(origin));
     },
-  });
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    maxAge: 600,
+  })
+);
+
+// 5. Body parsers with sensible limits
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// 6. Never let a password hash leave the API, whatever a controller returns
+app.use(sanitizeResponse);
+
+// Root status route
+app.get('/', (req, res) => {
+  res.json({ status: 'UP', service: 'Expense Tracker API' });
 });
 
-// Dual mounting: mount apiRouter on both '/expense-tracker-api' and root '/'
-// This ensures full backward compatibility with any frontend configuration (with or without servlet context path)
+// Dual mounting keeps compatibility with frontends configured with or without the context path
 app.use('/expense-tracker-api', apiRouter);
 app.use('/', apiRouter);
 
-// Centralized error handling
+// 404 + centralized error handling (must be last)
+app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Start server
 const server = app.listen(PORT, async () => {
-  console.log(`🚀 Expense Tracker Node.js Server listening on port ${PORT}`);
-  console.log(`📡 Endpoints active on http://localhost:${PORT}/ and http://localhost:${PORT}/expense-tracker-api/`);
+  console.log(`🚀 Expense Tracker server listening on port ${PORT}`);
 
-  // Initialize Database Schema & Seed Data
   try {
-    console.log('🔄 Verifying and initializing database schema...');
     await initializeSchema();
-    console.log('✅ Database schema verified.');
-
-    console.log('🔄 Initializing default seed data...');
     await initializeData();
-    console.log('✅ Default seed data verified.');
+    console.log('✅ Database schema and seed data verified.');
   } catch (err) {
-    console.warn('⚠️ Warning: Database initialization error on startup (check network/credentials):', err.message);
+    console.warn('⚠️ Database initialization error on startup (check network/credentials):', err.message);
   }
 
-  // Initialize recurring background jobs
   try {
     initRecurringJobs();
+    // Free hosting tiers sleep, so a midnight-only job can be missed entirely.
+    // Catch up on anything that became due while the server was down.
+    runRecurringCatchUp();
   } catch (err) {
-    console.warn('⚠️ Warning: Failed to start background cron job:', err.message);
+    console.warn('⚠️ Failed to start recurring transaction jobs:', err.message);
   }
+});
+
+// Keep a single bad request or promise from taking the whole server down silently
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
 });
 
 // Graceful shutdown
@@ -125,10 +174,10 @@ const gracefulShutdown = (signal) => {
     console.log('💤 HTTP server closed.');
     process.exit(0);
   });
+  setTimeout(() => process.exit(1), 10000).unref();
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;
-

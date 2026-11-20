@@ -1,4 +1,5 @@
 const recurringTransactionService = require('../services/recurringTransactionService');
+const { toDateStr } = require('../utils/dateUtil');
 
 const formatRecurringTransactionDto = (rt) => {
   if (!rt) return null;
@@ -8,9 +9,10 @@ const formatRecurringTransactionDto = (rt) => {
     amount: rt.amount != null ? parseFloat(rt.amount) : 0,
     type: rt.type,
     recurrenceType: rt.recurrence_type || rt.recurrenceType,
-    startDate: rt.start_date || rt.startDate,
-    endDate: rt.end_date || rt.endDate,
-    nextDueDate: rt.next_due_date || rt.nextDueDate,
+    // Plain 'YYYY-MM-DD' strings: no time zone shifting between server and browser.
+    startDate: toDateStr(rt.start_date || rt.startDate),
+    endDate: toDateStr(rt.end_date || rt.endDate),
+    nextDueDate: toDateStr(rt.next_due_date || rt.nextDueDate),
     notes: rt.notes,
     isActive: rt.is_active !== undefined ? !!rt.is_active : (rt.isActive !== undefined ? !!rt.isActive : true),
     createdAt: rt.created_at || rt.createdAt,
@@ -91,8 +93,13 @@ class RecurringTransactionController {
 
   async executeRecurringTransaction(req, res, next) {
     try {
-      await recurringTransactionService.executeRecurringTransaction(req.params.id, req.user);
-      res.status(200).send();
+      const result = await recurringTransactionService.executeRecurringTransaction(req.params.id, req.user);
+      res.status(200).json({
+        success: true,
+        created: result.created,
+        nextDueDate: result.nextDueDate,
+        isActive: result.isActive,
+      });
     } catch (err) {
       next(err);
     }

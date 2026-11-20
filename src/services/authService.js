@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const userRepository = require('../repositories/userRepository');
 const occupationService = require('./occupationService');
 
@@ -56,7 +56,7 @@ class AuthService {
     }
 
     const salt = await bcrypt.genSalt(10);
-    const randomPassword = await bcrypt.hash(uuidv4(), salt);
+    const randomPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), salt);
 
     const newUser = await userRepository.create({
       username,

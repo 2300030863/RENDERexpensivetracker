@@ -1,38 +1,62 @@
 const bcrypt = require('bcryptjs');
 const userRepository = require('../repositories/userRepository');
 const occupationRepository = require('../repositories/occupationRepository');
+const { passwordPolicyError } = require('../utils/validate');
 
 async function initializeData() {
   try {
-    // 1. Initialize default OWNER user if not exists
-    const ownerExists = await userRepository.existsByUsername('SIVESH');
-    if (!ownerExists) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash('Sivesh@167', salt);
+    // 1. Bootstrap the first OWNER account - only from environment variables.
+    // No username/password is ever hardcoded in source: set OWNER_USERNAME, OWNER_EMAIL and
+    // OWNER_PASSWORD once (first deploy), then remove OWNER_PASSWORD from the environment.
+    const ownerUsername = (process.env.OWNER_USERNAME || '').trim();
+    const ownerEmail = (process.env.OWNER_EMAIL || '').trim().toLowerCase();
+    const ownerPassword = process.env.OWNER_PASSWORD || '';
 
-      await userRepository.create({
-        username: 'SIVESH',
-        email: 'siveshkommalapati167@gmail.com',
-        password: hashedPassword,
-        firstName: 'SIVESH',
-        lastName: 'KOMMALAPATI',
-        country: 'India',
-        role: 'ROLE_OWNER',
-        blocked: false,
-        isOAuthUser: false,
-      });
-      console.log('✓ Default OWNER user created: SIVESH');
+    if (ownerUsername && ownerEmail && ownerPassword) {
+      const ownerExists =
+        (await userRepository.existsByUsername(ownerUsername)) || (await userRepository.existsByEmail(ownerEmail));
+      if (!ownerExists) {
+        const policyError = passwordPolicyError(ownerPassword);
+        if (policyError) {
+          console.warn(`⚠️ OWNER_PASSWORD rejected: ${policyError}. Owner account was NOT created.`);
+        } else {
+          const salt = await bcrypt.genSalt(12);
+          const hashedPassword = await bcrypt.hash(ownerPassword, salt);
+
+          await userRepository.create({
+            username: ownerUsername,
+            email: ownerEmail,
+            password: hashedPassword,
+            firstName: process.env.OWNER_FIRST_NAME || ownerUsername,
+            lastName: process.env.OWNER_LAST_NAME || '',
+            country: process.env.OWNER_COUNTRY || 'India',
+            role: 'ROLE_OWNER',
+            blocked: false,
+            isOAuthUser: false,
+          });
+          console.log(`✓ OWNER account created: ${ownerUsername}`);
+        }
+      }
     } else {
-      console.log('✓ Default user already exists: SIVESH');
+      console.log('ℹ️ No OWNER_* variables set - skipping owner bootstrap.');
     }
 
     // 2. Initialize Occupations and Templates
     const occupationCount = await occupationRepository.count();
     console.log(`📊 Current occupation count: ${occupationCount}`);
 
-    const allOccupations = await occupationRepository.findAll();
-    const farmerExists = allOccupations.some(o => o.occupation_type === 'FARMER');
+    if (occupationCount === 0) {
+      console.log('🎯 Initializing occupation data...');
+      await initializeAllOccupations();
+      const finalCount = await occupationRepository.count();
+      console.log(`✅ Occupation data initialized successfully! Final count: ${finalCount}`);
+    } else {
+      console.log(`ℹ️ Occupations already exist. Total count: ${occupationCount}`);
+    }
 
+    // Older databases may predate the Farmer occupation - add it only if it is still missing.
+    const allOccupations = await occupationRepository.findAll();
+    const farmerExists = allOccupations.some((o) => o.occupation_type === 'FARMER');
     if (!farmerExists) {
       console.log('🚜 Farmer occupation not found. Adding it now...');
       const farmer = await occupationRepository.createOccupation(
@@ -42,15 +66,6 @@ async function initializeData() {
       );
       await createFarmerCategories(farmer.id);
       console.log('✅ Farmer occupation added successfully!');
-    }
-
-    if (occupationCount === 0) {
-      console.log('🎯 Initializing occupation data...');
-      await initializeAllOccupations();
-      const finalCount = await occupationRepository.count();
-      console.log(`✅ Occupation data initialized successfully! Final count: ${finalCount}`);
-    } else {
-      console.log(`ℹ️ Occupations already exist. Total count: ${occupationCount}`);
     }
   } catch (error) {
     console.error('⚠️ Failed to initialize application data:', error.message);
