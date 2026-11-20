@@ -400,8 +400,6 @@ class AdminService {
       adminId,
     });
   }
-    });
-  }
 
   async getAdminDashboardStats(adminUser) {
     const users = await this.getUsersForAdmin(adminUser);
