@@ -31,6 +31,16 @@ class UserProfileController {
     }
   }
 
+  async deleteMyAccount(req, res, next) {
+    try {
+      await userProfileService.deleteMyAccount(req.user);
+      return res.status(200).json({ message: 'Account deleted successfully' });
+    } catch (error) {
+      console.error('Delete account error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
   // Aliases for route flexibility
   async getProfile(req, res, next) {
     return this.getUserProfile(req, res, next);

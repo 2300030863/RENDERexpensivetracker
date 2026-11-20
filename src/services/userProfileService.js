@@ -3,6 +3,13 @@ const { assertPassword } = require('../utils/validate');
 const userRepository = require('../repositories/userRepository');
 const adminRepository = require('../repositories/adminRepository');
 const occupationRepository = require('../repositories/occupationRepository');
+const transactionRepository = require('../repositories/transactionRepository');
+const categoryRepository = require('../repositories/categoryRepository');
+const budgetRepository = require('../repositories/budgetRepository');
+const accountRepository = require('../repositories/accountRepository');
+const recurringTransactionRepository = require('../repositories/recurringTransactionRepository');
+const passwordResetTokenRepository = require('../repositories/passwordResetTokenRepository');
+const { invalidateUserAuthCache } = require('../middleware/auth');
 
 class UserProfileService {
   async getUserProfile(user) {
@@ -100,6 +107,25 @@ class UserProfileService {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(request.newPassword, salt);
     await userRepository.update(managedUser.id, { password: hashedPassword });
+  }
+
+  async deleteMyAccount(user) {
+    const managedUser = await userRepository.findById(user.id);
+    if (!managedUser) throw new Error('User not found');
+    if (managedUser.role === 'ROLE_OWNER') {
+      throw new Error('Root system owner account cannot be deleted via self-service.');
+    }
+
+    const userId = managedUser.id;
+    await passwordResetTokenRepository.deleteByUserId(userId);
+    await transactionRepository.nullifyUser(userId);
+    await recurringTransactionRepository.deleteByUserId(userId);
+    await budgetRepository.deleteByUserId(userId);
+    await categoryRepository.deleteByUserId(userId);
+    await accountRepository.deleteByUserId(userId);
+    await userRepository.delete(userId);
+    invalidateUserAuthCache(userId);
+    return { success: true };
   }
 }
 

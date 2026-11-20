@@ -346,6 +346,68 @@ async function initializeSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    // 13. Payment Recipients table (Pay & Track)
+    await query(`
+      CREATE TABLE IF NOT EXISTS payment_recipients (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        upi_id VARCHAR(150),
+        phone VARCHAR(20),
+        recipient_type VARCHAR(50) DEFAULT 'FRIEND',
+        is_favorite BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_recipient_user (user_id),
+        INDEX idx_recipient_fav (user_id, is_favorite),
+        INDEX idx_recipient_upi (upi_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 14. Payments table (Pay & Track)
+    await query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        recipient_id BIGINT,
+        recipient_name VARCHAR(150) NOT NULL,
+        upi_id VARCHAR(150),
+        amount DECIMAL(10, 2) NOT NULL,
+        payment_method VARCHAR(20) NOT NULL,
+        status VARCHAR(30) NOT NULL,
+        category_id BIGINT NOT NULL,
+        account_id BIGINT NOT NULL,
+        transaction_id BIGINT,
+        payment_date DATE NOT NULL,
+        notes VARCHAR(500),
+        reference_id VARCHAR(100) UNIQUE,
+        idempotency_key VARCHAR(100),
+        attempt_count INT DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_payments_user (user_id),
+        INDEX idx_payments_status (status),
+        INDEX idx_payments_date (payment_date),
+        INDEX idx_payments_method (payment_method),
+        INDEX idx_payments_ref (reference_id),
+        INDEX idx_payments_idempotency (user_id, idempotency_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 15. Payment Attempts table (Audit trail for retries & app launches)
+    await query(`
+      CREATE TABLE IF NOT EXISTS payment_attempts (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        payment_id BIGINT NOT NULL,
+        attempt_number INT NOT NULL DEFAULT 1,
+        status VARCHAR(30) NOT NULL DEFAULT 'INITIATED',
+        platform VARCHAR(50),
+        upi_uri TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_attempts_payment (payment_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
     // Ensure columns exist on tables (in case of partial migrations)
     try {
       await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT FALSE`);
@@ -380,6 +442,12 @@ async function initializeSchema() {
     try {
       await query(`ALTER TABLE email_otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0`);
     } catch (_) {}
+    try {
+      await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100)`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 1`);
+    } catch (_) {}
 
     // Ensure created_at has DEFAULT CURRENT_TIMESTAMP across all tables in MySQL/TiDB
     const tablesForCreatedAt = [
@@ -394,7 +462,10 @@ async function initializeSchema() {
       'recurring_transactions',
       'transactions',
       'occupations',
-      'occupation_category_templates'
+      'occupation_category_templates',
+      'payment_recipients',
+      'payments',
+      'payment_attempts'
     ];
 
     for (const tbl of tablesForCreatedAt) {

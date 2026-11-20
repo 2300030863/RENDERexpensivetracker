@@ -89,7 +89,6 @@ public class PasswordResetService {
         // This prevents attackers from discovering which accounts are registered
     }
     
-    @SuppressWarnings("null")
     private void sendPasswordResetEmail(User user, String token) {
         String resetUrl = frontendUrl + "/reset-password?token=" + token;
 

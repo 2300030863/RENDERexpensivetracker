@@ -122,7 +122,6 @@ public class EmailOtpService {
         return sb.toString();
     }
 
-    @SuppressWarnings("null")
     private void sendOtpEmail(String email, String otp) {
         try {
             MimeMessage mimeMessage = mailSender.createMimeMessage();

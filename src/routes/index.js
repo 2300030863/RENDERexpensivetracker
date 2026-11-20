@@ -11,6 +11,7 @@ const budgetRoutes = require('./budgetRoutes');
 const analyticsRoutes = require('./analyticsRoutes');
 const recurringTransactionRoutes = require('./recurringTransactionRoutes');
 const adminRoutes = require('./adminRoutes');
+const paymentRoutes = require('./paymentRoutes');
 
 const analyticsController = require('../controllers/analyticsController');
 const { authenticateToken } = require('../middleware/auth');
@@ -40,6 +41,7 @@ router.use('/budgets', budgetRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/recurring-transactions', recurringTransactionRoutes);
 router.use('/admin', adminRoutes);
+router.use('/payments', paymentRoutes);
 
 module.exports = router;
 

@@ -497,7 +497,6 @@ public class AdminService {
     /**
      * Delete admin (OWNER only)
      */
-    @SuppressWarnings("null")
     public void deleteAdmin(User ownerUser, Long adminId) {
         if (ownerUser.getRole() != UserRole.ROLE_OWNER) {
             throw new RuntimeException("Only OWNER can delete admins");
