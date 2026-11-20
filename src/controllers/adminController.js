@@ -10,7 +10,8 @@ class AdminController {
       const stats = await adminService.getAdminDashboardStats(req.user);
       res.json(stats);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getDashboardStats error:', err);
+      next(err);
     }
   }
 
@@ -19,7 +20,8 @@ class AdminController {
       const users = await adminService.getUsersForAdmin(req.user);
       res.json(users);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getAllUsers error:', err);
+      next(err);
     }
   }
 
@@ -28,7 +30,8 @@ class AdminController {
       const users = await adminService.getUsersWithGroupInfo(req.user);
       res.json(users);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getAllUsersWithGroups error:', err);
+      next(err);
     }
   }
 
@@ -42,7 +45,8 @@ class AdminController {
       await adminService.changeUserRole(req.params.id, targetRole);
       res.json({ message: 'Role changed successfully' });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] changeUserRole error:', err);
+      next(err);
     }
   }
 
@@ -54,7 +58,8 @@ class AdminController {
       }
       res.json(user);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] getUserById error:', err);
+      next(err);
     }
   }
 
@@ -71,7 +76,8 @@ class AdminController {
       );
       res.status(201).json(user);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] createUser error:', err);
+      next(err);
     }
   }
 
@@ -102,8 +108,8 @@ class AdminController {
         delivered: result.delivered,
       });
     } catch (err) {
-      console.error('requestDeleteOtp error:', err);
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] requestDeleteOtp error:', err);
+      next(err);
     }
   }
 
@@ -142,8 +148,8 @@ class AdminController {
       await adminService.deleteUserForAdmin(req.user, userId);
       res.json({ success: true, message: `Account "${targetUser.username}" has been permanently deleted.` });
     } catch (err) {
-      console.error('deleteUser error:', err);
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] deleteUser error:', err);
+      next(err);
     }
   }
 
@@ -152,7 +158,8 @@ class AdminController {
       const transactions = await adminService.getTransactionsForAdmin(req.user);
       res.json(transactions);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getAllTransactions error:', err);
+      next(err);
     }
   }
 
@@ -161,7 +168,8 @@ class AdminController {
       const transactions = await adminService.getTransactionsForUserByAdmin(req.user, req.params.userId);
       res.json(transactions);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] getUserTransactions error:', err);
+      next(err);
     }
   }
 
@@ -170,7 +178,8 @@ class AdminController {
       const transaction = await adminService.approveTransaction(req.user, req.params.transactionId);
       res.json(transaction);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] approveTransaction error:', err);
+      next(err);
     }
   }
 
@@ -179,7 +188,8 @@ class AdminController {
       const categories = await adminService.getCategoriesForAdmin(req.user);
       res.json(categories);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getAllCategories error:', err);
+      next(err);
     }
   }
 
@@ -189,7 +199,8 @@ class AdminController {
       const category = await adminService.createCategoryForAdmin(req.user, name, description, color);
       res.status(201).json(category);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] createCategory error:', err);
+      next(err);
     }
   }
 
@@ -198,7 +209,8 @@ class AdminController {
       const category = await categoryService.updateCategory(req.user, req.params.id, req.body);
       res.json(category);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] updateCategory error:', err);
+      next(err);
     }
   }
 
@@ -207,7 +219,8 @@ class AdminController {
       await categoryService.deleteCategory(req.user, req.params.id);
       res.status(200).json({ message: 'Category deleted successfully' });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] deleteCategory error:', err);
+      next(err);
     }
   }
 
@@ -217,7 +230,8 @@ class AdminController {
       const budget = await adminService.createBudgetForAdmin(req.user, amount, categoryId);
       res.status(201).json(budget);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] createBudget error:', err);
+      next(err);
     }
   }
 
@@ -234,7 +248,8 @@ class AdminController {
       );
       res.status(201).json(admin);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] createAdmin error:', err);
+      next(err);
     }
   }
 
@@ -243,7 +258,8 @@ class AdminController {
       const admins = await adminService.getAllAdmins(req.user);
       res.json(admins);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] getAllAdmins error:', err);
+      next(err);
     }
   }
 
@@ -252,7 +268,8 @@ class AdminController {
       await adminService.deleteAdmin(req.user, req.params.adminId);
       res.json({ message: 'Admin deleted successfully' });
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] deleteAdmin error:', err);
+      next(err);
     }
   }
 
@@ -262,7 +279,8 @@ class AdminController {
       const userGroup = await adminService.createUserGroup(req.user, name, description);
       res.status(201).json(userGroup);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] createUserGroup error:', err);
+      next(err);
     }
   }
 
@@ -271,7 +289,8 @@ class AdminController {
       const groups = await adminService.getUserGroupsForAdmin(req.user);
       res.json(groups);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[AdminController] getUserGroups error:', err);
+      next(err);
     }
   }
 
@@ -280,7 +299,8 @@ class AdminController {
       const user = await adminService.assignUserToGroup(req.user, req.params.userId, req.params.groupId);
       res.json(user);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] assignUserToGroup error:', err);
+      next(err);
     }
   }
 
@@ -289,7 +309,8 @@ class AdminController {
       const users = await adminService.getUsersInGroup(req.user, req.params.groupId);
       res.json(users);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] getUsersInGroup error:', err);
+      next(err);
     }
   }
 
@@ -298,7 +319,8 @@ class AdminController {
       const accounts = await adminService.getUserAccountsForAdmin(req.user, req.params.userId);
       res.json(accounts);
     } catch (err) {
-      res.status(403).json({ error: err.message });
+      console.error('[AdminController] getUserAccounts error:', err);
+      next(err);
     }
   }
 
@@ -310,7 +332,8 @@ class AdminController {
         user,
       });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] promoteUserToAdmin error:', err);
+      next(err);
     }
   }
 
@@ -332,7 +355,8 @@ class AdminController {
         totalRequested: (recipientIds || []).length,
       });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to send emails: ' + err.message });
+      console.error('[AdminController] sendEmailToUsers error:', err);
+      next(err);
     }
   }
 
@@ -351,7 +375,8 @@ class AdminController {
         sentCount,
       });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to send emails: ' + err.message });
+      console.error('[AdminController] sendEmailToAllByRole error:', err);
+      next(err);
     }
   }
 
@@ -360,7 +385,8 @@ class AdminController {
       await adminService.blockUser(req.user, req.params.userId);
       res.json({ message: 'User blocked successfully' });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] blockUser error:', err);
+      next(err);
     }
   }
 
@@ -369,7 +395,8 @@ class AdminController {
       await adminService.unblockUser(req.user, req.params.userId);
       res.json({ message: 'User unblocked successfully' });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      console.error('[AdminController] unblockUser error:', err);
+      next(err);
     }
   }
 }

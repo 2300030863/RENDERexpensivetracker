@@ -23,6 +23,7 @@ const isBlocked = (val) => {
 
 class AdminService {
   async getAdminByUser(adminUser) {
+    if (!adminUser) return null;
     if (adminUser.role === 'ROLE_OWNER') {
       return null;
     }
@@ -32,19 +33,24 @@ class AdminService {
     }
 
     let admin = await adminRepository.findByEmail(adminUser.email);
-    if (!admin) {
+    if (!admin && adminUser.username) {
       admin = await adminRepository.findByUsername(adminUser.username);
-      if (!admin) {
-        // Auto-create Admin record
+    }
+    if (!admin) {
+      try {
         admin = await adminRepository.create({
           username: adminUser.username,
           email: adminUser.email,
-          password: adminUser.password,
-          firstName: adminUser.first_name,
-          lastName: adminUser.last_name,
+          password: adminUser.password || '$2a$10$e79GZkL1x8a5g8uA3j.xEu1Q5G4IqL9V0U3L.4Y.6gM4O2z7mIe7G',
+          firstName: adminUser.first_name || adminUser.firstName || '',
+          lastName: adminUser.last_name || adminUser.lastName || '',
           isActive: true,
           ownerId: adminUser.id,
         });
+      } catch (createErr) {
+        admin = (await adminRepository.findByEmail(adminUser.email)) ||
+                (await adminRepository.findByUsername(adminUser.username));
+        if (!admin) throw createErr;
       }
     }
     return admin;
@@ -55,6 +61,7 @@ class AdminService {
       return await userRepository.findByRole('ROLE_USER');
     }
     const admin = await this.getAdminByUser(adminUser);
+    if (!admin) return [];
     return await userRepository.findByAdmin(admin.id);
   }
 
@@ -65,7 +72,9 @@ class AdminService {
       users = await userRepository.findAllWithGroupInfoForOwner('ROLE_OWNER');
     } else if (adminUser.role === 'ROLE_ADMIN') {
       const admin = await this.getAdminByUser(adminUser);
-      users = await userRepository.findByAdminManagedUsersWithGroupInfo(admin.id);
+      if (admin) {
+        users = await userRepository.findByAdminManagedUsersWithGroupInfo(admin.id);
+      }
     } else {
       throw new Error('Access denied');
     }
@@ -169,7 +178,16 @@ class AdminService {
       throw new Error('Email already exists');
     }
 
-    const admin = await this.getAdminByUser(adminUser);
+    let adminId = null;
+    if (adminUser.role === 'ROLE_ADMIN') {
+      const admin = await this.getAdminByUser(adminUser);
+      adminId = admin ? admin.id : null;
+    } else if (adminUser.role === 'ROLE_OWNER') {
+      const admin = (await adminRepository.findByEmail(adminUser.email)) ||
+                    (await adminRepository.findByUsername(adminUser.username));
+      adminId = admin ? admin.id : null;
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -180,7 +198,7 @@ class AdminService {
       firstName,
       lastName,
       role: 'ROLE_USER',
-      adminId: admin.id,
+      adminId,
     });
   }
 
@@ -240,7 +258,7 @@ class AdminService {
     }
 
     const admin = await this.getAdminByUser(adminUser);
-    if (user.admin_id === admin.id || user.group_admin_id === admin.id) {
+    if (admin && (user.admin_id === admin.id || user.group_admin_id === admin.id)) {
       return user;
     }
 
@@ -253,6 +271,9 @@ class AdminService {
     }
 
     const admin = await this.getAdminByUser(adminUser);
+    if (!admin) {
+      return await transactionRepository.findByUser(adminUser.id);
+    }
 
     // Admin's own transactions
     const adminTxns = await transactionRepository.findByUser(adminUser.id);
@@ -290,6 +311,8 @@ class AdminService {
     }
 
     const admin = await this.getAdminByUser(adminUser);
+    if (!admin) throw new Error('Access denied');
+
     const txnUser = await userRepository.findByIdWithUserGroup(transaction.user_id);
     if (txnUser && (txnUser.admin_id === admin.id || txnUser.group_admin_id === admin.id)) {
       return await transactionRepository.approve(transactionId);
@@ -299,12 +322,21 @@ class AdminService {
   }
 
   async createCategoryForAdmin(adminUser, name, description, color) {
-    const admin = await this.getAdminByUser(adminUser);
+    let adminId = null;
+    if (adminUser.role === 'ROLE_ADMIN') {
+      const admin = await this.getAdminByUser(adminUser);
+      adminId = admin ? admin.id : null;
+    } else if (adminUser.role === 'ROLE_OWNER') {
+      const admin = (await adminRepository.findByEmail(adminUser.email)) ||
+                    (await adminRepository.findByUsername(adminUser.username));
+      adminId = admin ? admin.id : null;
+    }
+
     return await categoryRepository.create({
       name,
       description,
       color,
-      adminId: admin.id,
+      adminId,
       isDefault: false,
     });
   }
@@ -321,13 +353,15 @@ class AdminService {
     categories.push(...adminCats);
 
     const admin = await this.getAdminByUser(adminUser);
-    const userGroups = await userGroupRepository.findByAdmin(admin.id);
+    if (admin) {
+      const userGroups = await userGroupRepository.findByAdmin(admin.id);
 
-    for (const group of userGroups) {
-      const groupCats = await categoryRepository.findByUserGroupOrIsDefaultTrue(group.id);
-      for (const cat of groupCats) {
-        if (!cat.is_default && !categories.some(c => c.id === cat.id)) {
-          categories.push(cat);
+      for (const group of userGroups) {
+        const groupCats = await categoryRepository.findByUserGroupOrIsDefaultTrue(group.id);
+        for (const cat of groupCats) {
+          if (!cat.is_default && !categories.some(c => c.id === cat.id)) {
+            categories.push(cat);
+          }
         }
       }
     }
@@ -336,7 +370,16 @@ class AdminService {
   }
 
   async createBudgetForAdmin(adminUser, amount, categoryId) {
-    const admin = await this.getAdminByUser(adminUser);
+    let adminId = null;
+    if (adminUser.role === 'ROLE_ADMIN') {
+      const admin = await this.getAdminByUser(adminUser);
+      adminId = admin ? admin.id : null;
+    } else if (adminUser.role === 'ROLE_OWNER') {
+      const admin = (await adminRepository.findByEmail(adminUser.email)) ||
+                    (await adminRepository.findByUsername(adminUser.username));
+      adminId = admin ? admin.id : null;
+    }
+
     const category = await categoryRepository.findById(categoryId);
     if (!category) throw new Error('Category not found');
 
@@ -354,7 +397,9 @@ class AdminService {
       isActive: true,
       userId: adminUser.id,
       categoryId: category.id,
-      adminId: admin.id,
+      adminId,
+    });
+  }
     });
   }
 
@@ -449,17 +494,30 @@ class AdminService {
   async createUserGroup(adminUser, name, description) {
     let admin = null;
     if (adminUser.role === 'ROLE_OWNER') {
-      admin = await adminRepository.findByEmail(adminUser.email);
+      admin = (await adminRepository.findByEmail(adminUser.email)) ||
+              (await adminRepository.findByUsername(adminUser.username));
       if (!admin) {
-        admin = await adminRepository.create({
-          username: adminUser.username,
-          email: adminUser.email,
-          password: adminUser.password,
-          ownerId: adminUser.id,
-        });
+        try {
+          admin = await adminRepository.create({
+            username: adminUser.username,
+            email: adminUser.email,
+            password: adminUser.password || '$2a$10$e79GZkL1x8a5g8uA3j.xEu1Q5G4IqL9V0U3L.4Y.6gM4O2z7mIe7G',
+            firstName: adminUser.first_name || adminUser.firstName || '',
+            lastName: adminUser.last_name || adminUser.lastName || '',
+            ownerId: adminUser.id,
+          });
+        } catch (createErr) {
+          admin = (await adminRepository.findByEmail(adminUser.email)) ||
+                  (await adminRepository.findByUsername(adminUser.username));
+          if (!admin) throw createErr;
+        }
       }
     } else {
       admin = await this.getAdminByUser(adminUser);
+    }
+
+    if (!admin) {
+      throw new Error('Admin profile could not be found or initialized');
     }
 
     const userGroup = await userGroupRepository.create({
@@ -479,7 +537,7 @@ class AdminService {
       return await userGroupRepository.findAll();
     }
 
-    const admin = await adminRepository.findByEmail(adminUser.email);
+    const admin = await this.getAdminByUser(adminUser);
     if (!admin) return [];
 
     return await userGroupRepository.findByAdmin(admin.id);
@@ -494,7 +552,7 @@ class AdminService {
 
     if (adminUser.role !== 'ROLE_OWNER') {
       const admin = await this.getAdminByUser(adminUser);
-      if (group.admin_id !== admin.id) {
+      if (!admin || group.admin_id !== admin.id) {
         throw new Error('Access denied to this user group');
       }
     }
@@ -519,7 +577,7 @@ class AdminService {
 
     if (adminUser.role !== 'ROLE_OWNER') {
       const admin = await this.getAdminByUser(adminUser);
-      if (admin && group.admin_id !== admin.id) {
+      if (!admin || group.admin_id !== admin.id) {
         throw new Error('Access denied to this user group');
       }
     }
@@ -538,7 +596,7 @@ class AdminService {
 
     if (adminUser.role === 'ROLE_ADMIN') {
       const admin = await this.getAdminByUser(adminUser);
-      if (user.admin_id === admin.id || user.group_admin_id === admin.id) {
+      if (admin && (user.admin_id === admin.id || user.group_admin_id === admin.id)) {
         return await accountRepository.findByUserId(userId);
       }
       throw new Error("Access denied to this user's accounts");

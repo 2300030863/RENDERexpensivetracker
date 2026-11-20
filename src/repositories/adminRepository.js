@@ -2,17 +2,30 @@ const { query, execute } = require('../config/database');
 
 class AdminRepository {
   async findById(id) {
+    if (!id) return null;
     const rows = await query('SELECT * FROM admins WHERE id = ?', [id]);
     return rows[0] || null;
   }
 
   async findByUsername(username) {
-    const rows = await query('SELECT * FROM admins WHERE username = ?', [username]);
+    if (!username) return null;
+    const rows = await query('SELECT * FROM admins WHERE LOWER(username) = LOWER(?) LIMIT 1', [username.trim()]);
     return rows[0] || null;
   }
 
   async findByEmail(email) {
-    const rows = await query('SELECT * FROM admins WHERE email = ?', [email]);
+    if (!email) return null;
+    const rows = await query('SELECT * FROM admins WHERE LOWER(email) = LOWER(?) LIMIT 1', [email.trim()]);
+    return rows[0] || null;
+  }
+
+  async findByUsernameOrEmail(identifier) {
+    if (!identifier) return null;
+    const clean = identifier.trim().toLowerCase();
+    const rows = await query(
+      'SELECT * FROM admins WHERE LOWER(username) = ? OR LOWER(email) = ? LIMIT 1',
+      [clean, clean]
+    );
     return rows[0] || null;
   }
 
@@ -25,12 +38,14 @@ class AdminRepository {
   }
 
   async existsByUsername(username) {
-    const rows = await query('SELECT id FROM admins WHERE username = ? LIMIT 1', [username]);
+    if (!username) return false;
+    const rows = await query('SELECT id FROM admins WHERE LOWER(username) = LOWER(?) LIMIT 1', [username.trim()]);
     return rows.length > 0;
   }
 
   async existsByEmail(email) {
-    const rows = await query('SELECT id FROM admins WHERE email = ? LIMIT 1', [email]);
+    if (!email) return false;
+    const rows = await query('SELECT id FROM admins WHERE LOWER(email) = LOWER(?) LIMIT 1', [email.trim()]);
     return rows.length > 0;
   }
 
@@ -42,7 +57,7 @@ class AdminRepository {
     const params = [
       admin.username,
       admin.email,
-      admin.password,
+      admin.password || '$2a$10$e79GZkL1x8a5g8uA3j.xEu1Q5G4IqL9V0U3L.4Y.6gM4O2z7mIe7G',
       admin.firstName || admin.first_name || '',
       admin.lastName || admin.last_name || '',
       admin.isActive !== undefined ? (admin.isActive ? 1 : 0) : 1,

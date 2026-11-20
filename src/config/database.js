@@ -357,7 +357,25 @@ async function initializeSchema() {
       await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS occupation_id BIGINT`);
     } catch (_) {}
     try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_group_id BIGINT`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_id BIGINT`);
+    } catch (_) {}
+    try {
       await query(`ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_occupation_generated BOOLEAN DEFAULT FALSE`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE categories ADD COLUMN IF NOT EXISTS admin_id BIGINT`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS admin_id BIGINT`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS admin_id BIGINT`);
+    } catch (_) {}
+    try {
+      await query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE`);
     } catch (_) {}
     try {
       await query(`ALTER TABLE email_otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0`);

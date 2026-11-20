@@ -16,6 +16,15 @@ function normalizeUser(user) {
       user.is_oauth_user = Boolean(user.is_oauth_user === true || user.is_oauth_user === 1 || user.is_oauth_user === '1');
     }
   }
+  // Provide camelCase aliases for Spring Boot frontend compatibility
+  user.firstName = user.first_name !== undefined ? user.first_name : user.firstName;
+  user.lastName = user.last_name !== undefined ? user.last_name : user.lastName;
+  user.adminId = user.admin_id !== undefined ? user.admin_id : user.adminId;
+  user.userGroupId = user.user_group_id !== undefined ? user.user_group_id : user.userGroupId;
+  user.occupationId = user.occupation_id !== undefined ? user.occupation_id : user.occupationId;
+  user.isOAuthUser = user.is_oauth_user !== undefined ? user.is_oauth_user : user.isOAuthUser;
+  user.createdAt = user.created_at || user.createdAt;
+  user.updatedAt = user.updated_at || user.updatedAt;
   return user;
 }
 
