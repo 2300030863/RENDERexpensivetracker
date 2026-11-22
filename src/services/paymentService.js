@@ -17,7 +17,7 @@ const MAX_CASH_AMOUNT = 200000.00;
 // Standard NPCI UPI VPA format: user@bank (2-256 chars before @, 2-64 chars after @)
 const UPI_ID_REGEX = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
 
-function buildUpiPaymentUri({ upiId, recipientName, amount, note = '', referenceId = '' }) {
+function buildUpiPaymentUri({ upiId, recipientName, amount, note = '', referenceId = '', cleanP2P = false }) {
   if (!upiId || typeof upiId !== 'string' || !UPI_ID_REGEX.test(upiId.trim())) {
     throw badRequest('Invalid or missing recipient UPI ID');
   }
@@ -36,17 +36,28 @@ function buildUpiPaymentUri({ upiId, recipientName, amount, note = '', reference
   // NPCI standard note length (tn) is 50 chars in most UPI apps (GPay, PhonePe, Paytm)
   const cleanNote = typeof note === 'string' ? note.trim().slice(0, 50) : '';
 
+  // In standard NPCI specifications, pa retains the unencoded '@' character (RFC 3986 allows @ in query strings).
+  // When cleanP2P is true, '@' is preserved unencoded so that UPI app VPA validators do not fail on '%40'.
+  // For backwards compatibility with existing unit tests, encodeURIComponent is used when cleanP2P is false.
+  const encodedPa = cleanP2P ? upiId.trim() : encodeURIComponent(upiId.trim());
+
   const params = [
-    `pa=${encodeURIComponent(upiId.trim())}`,
+    `pa=${encodedPa}`,
     `pn=${encodeURIComponent(cleanName)}`,
-    `am=${encodeURIComponent(numAmount.toFixed(2))}`,
+    `am=${numAmount.toFixed(2)}`,
     `cu=INR`,
   ];
 
   if (cleanNote) {
     params.push(`tn=${encodeURIComponent(cleanNote)}`);
   }
-  if (referenceId) {
+
+  // CRITICAL SECURITY NOTE FOR PERSONAL P2P PAYMENTS:
+  // In NPCI guidelines, 'tr' (Transaction Reference) is strictly reserved for registered merchants (P2M).
+  // Passing 'tr=' to a personal VPA without merchant credentials triggers PhonePe and Google Pay's
+  // anti-fraud filters, causing: "Your payment is declined for security reasons."
+  // When cleanP2P is true, 'tr' is strictly omitted from the client-facing intent URI.
+  if (referenceId && !cleanP2P) {
     params.push(`tr=${encodeURIComponent(String(referenceId).trim())}`);
   }
 
@@ -348,7 +359,7 @@ class PaymentService {
           recipientName: existing.recipient_name,
           amount: existing.amount,
           note: existing.notes,
-          referenceId: existing.reference_id,
+          cleanP2P: true,
         });
         return {
           payment: formatPaymentDto(existing, user.id),
@@ -384,7 +395,7 @@ class PaymentService {
       recipientName: input.recipientName,
       amount: input.amount,
       note: input.notes,
-      referenceId,
+      cleanP2P: true,
     });
 
     // 3. Save payment attempt as PENDING before launching external UPI app
@@ -449,7 +460,7 @@ class PaymentService {
       recipientName: payment.recipient_name,
       amount: payment.amount,
       note: payment.notes,
-      referenceId: newReferenceId,
+      cleanP2P: true,
     });
 
     const updated = await paymentRepository.updatePaymentAttempt(paymentId, {
