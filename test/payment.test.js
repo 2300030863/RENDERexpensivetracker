@@ -561,7 +561,7 @@ describe('Pay & Track Service & Validation Suite', () => {
       assert.equal(transactionCreated, false, 'No transaction should be created for unverified status');
     });
 
-    test('Transitions from UNVERIFIED to SUCCESS upon explicit user confirmation, creating expense and updating balance once', async () => {
+    test('Transitions from UNVERIFIED to MANUAL_UNVERIFIED upon explicit user confirmation, creating expense and updating balance once', async () => {
       let createdTransactionsCount = 0;
       let balanceDeductionsCount = 0;
 
@@ -600,14 +600,14 @@ describe('Pay & Track Service & Validation Suite', () => {
         confirmationNotes: 'Debited from HDFC',
       });
 
-      assert.equal(confirmed.status, 'SUCCESS');
+      assert.equal(confirmed.status, 'MANUAL_UNVERIFIED');
       assert.equal(confirmed.transactionId, 888);
       assert.equal(createdTransactionsCount, 1);
       assert.equal(balanceDeductionsCount, 1);
 
-      // Verify idempotency: calling SUCCESS again when transaction_id already exists does not re-debit
+      // Verify idempotency: calling update again when transaction_id already exists does not re-debit
       currentPayment.transaction_id = 888;
-      currentPayment.status = 'SUCCESS';
+      currentPayment.status = 'MANUAL_UNVERIFIED';
       await paymentService.updatePaymentStatus(mockUser, 202, { status: 'SUCCESS' });
       assert.equal(createdTransactionsCount, 1, 'Duplicate transaction must never be created');
       assert.equal(balanceDeductionsCount, 1, 'Account balance must never be debited twice');
@@ -777,13 +777,13 @@ describe('Pay & Track Service & Validation Suite', () => {
       assert.equal(parentPayment.id, 501, 'Parent payment ID must remain unchanged');
       assert.equal(createdTransactions.length, 0, 'No transaction should be created yet for attempt 3');
 
-      // User finally confirms payment as SUCCESS
+      // User finally confirms payment as SUCCESS (mapped to MANUAL_UNVERIFIED for direct UPI)
       const finalized = await paymentService.updatePaymentStatus(mockUser, 501, {
         status: 'SUCCESS',
         confirmationNotes: 'UPI Ref 432198765432',
       });
 
-      assert.equal(finalized.status, 'SUCCESS');
+      assert.equal(finalized.status, 'MANUAL_UNVERIFIED');
       assert.equal(finalized.transactionId, 9002);
 
       // Verify that after 3 attempts, EXACTLY ONE expense transaction was created in transactions table

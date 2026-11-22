@@ -4,6 +4,7 @@ const transactionRepository = require('../repositories/transactionRepository');
 const accountRepository = require('../repositories/accountRepository');
 const accountService = require('./accountService');
 const categoryService = require('./categoryService');
+const gatewayService = require('./gatewayService');
 const { withTransaction } = require('../config/database');
 const { badRequest, notFound, forbidden } = require('../utils/httpError');
 const { isValidDateStr, toDateStr } = require('../utils/dateUtil');
@@ -182,6 +183,15 @@ function formatPaymentDto(p, currentUserId) {
     referenceId: p.reference_id,
     idempotencyKey: p.idempotency_key || null,
     attemptCount: p.attempt_count || 1,
+    gatewayProvider: p.gateway_provider || 'RAZORPAY',
+    gatewayOrderId: p.gateway_order_id || null,
+    gatewayPaymentId: p.gateway_payment_id || null,
+    gatewayErrorCode: p.gateway_error_code || null,
+    gatewayErrorDescription: p.gateway_error_description || null,
+    verifiedAt: p.verified_at || null,
+    isVerified: Boolean(p.verified_at && p.gateway_payment_id && p.status === 'SUCCESS' && !p.is_sandbox),
+    isSandbox: Boolean(p.is_sandbox),
+    isManualTransfer: p.payment_method === 'UPI' && !p.gateway_order_id,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     isOwner: p.user_id === currentUserId,
@@ -476,17 +486,24 @@ class PaymentService {
       throw forbidden('Access denied: You cannot update another user payment');
     }
 
-    const validStatuses = ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED', 'UNKNOWN', 'UNVERIFIED'];
+    const validStatuses = ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED', 'UNKNOWN', 'UNVERIFIED', 'MANUAL_UNVERIFIED'];
     const targetStatus = typeof status === 'string' ? status.toUpperCase().trim() : '';
     if (!validStatuses.includes(targetStatus)) {
       throw badRequest(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
     }
 
-    // If confirming payment as SUCCESS
-    if (targetStatus === 'SUCCESS') {
+    // Direct manual UPI link payments cannot be marked cryptographically SUCCESS via this endpoint
+    if (payment.gateway_order_id && targetStatus === 'SUCCESS') {
+      throw badRequest('Gateway-routed payments must be verified cryptographically via /payments/gateway/verify or official webhook');
+    }
+
+    // If recording a manual unverified transfer (Direct UPI or user self-reported)
+    if (targetStatus === 'SUCCESS' || targetStatus === 'MANUAL_UNVERIFIED') {
+      const finalStatus = payment.payment_method === 'CASH' ? 'CASH_PAID' : 'MANUAL_UNVERIFIED';
+
       // Idempotency: if transaction_id is already set, don't create duplicate expense!
       if (payment.transaction_id) {
-        const updated = await paymentRepository.updatePaymentStatus(paymentId, 'SUCCESS');
+        const updated = await paymentRepository.updatePaymentStatus(paymentId, finalStatus);
         return formatPaymentDto(updated, user.id);
       }
 
@@ -500,14 +517,15 @@ class PaymentService {
       }
 
       const noteText = [
-        payment.upi_id ? `[UPI to: ${payment.upi_id} | Ref: ${payment.reference_id}]` : `[Payment to: ${payment.recipient_name}]`,
+        `[Self-Reported Transfer - Unverified by Gateway | Ref: ${payment.reference_id}]`,
+        payment.upi_id ? `[UPI to: ${payment.upi_id}]` : `[Payment to: ${payment.recipient_name}]`,
         payment.notes,
-        confirmationNotes ? `(Confirmed: ${confirmationNotes})` : '',
+        confirmationNotes ? `(User Note: ${confirmationNotes})` : '',
       ].filter(Boolean).join(' ');
 
       const createdTxn = await transactionRepository.create({
         amount: payment.amount,
-        description: `UPI payment to ${payment.recipient_name}`,
+        description: `[Manual Transfer] UPI to ${payment.recipient_name}`,
         type: 'EXPENSE',
         transactionDate: payment.payment_date,
         notes: noteText.slice(0, 500),
@@ -516,12 +534,13 @@ class PaymentService {
         accountId: payment.account_id,
         recurringTransactionId: null,
         adminId: user.admin_id || null,
+        isSandbox: false,
       });
 
       // Deduct account balance
       await accountRepository.updateBalance(payment.account_id, payment.amount, 'EXPENSE');
 
-      const updated = await paymentRepository.updatePaymentStatus(paymentId, 'SUCCESS', createdTxn.id);
+      const updated = await paymentRepository.updatePaymentStatus(paymentId, finalStatus, createdTxn.id);
       return formatPaymentDto(updated, user.id);
     }
 
@@ -687,6 +706,508 @@ class PaymentService {
     if (!success) throw notFound('Recipient not found or not owned by you');
 
     return { success: true, message: 'Recipient deleted successfully' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // SECURE PAYMENT GATEWAY INTEGRATION (Razorpay / RBI-authorised Aggregator)
+  // ---------------------------------------------------------------------------
+
+  getGatewayConfig() {
+    return gatewayService.getPublicConfig();
+  }
+
+  async createGatewayOrder(user, request) {
+    const input = validateAndParsePaymentInput({ ...request, paymentMethod: 'UPI' });
+    const category = await requireVisibleCategory(user, request.categoryId || request.category_id);
+    const account = await requireVisibleAccount(user, request.accountId || request.account_id);
+
+    // 1. Idempotency Check
+    const idempotencyKey = typeof request.idempotencyKey === 'string' ? request.idempotencyKey.trim().slice(0, 100) : null;
+    if (idempotencyKey) {
+      const existing = await paymentRepository.findPaymentByIdempotencyKey(user.id, idempotencyKey);
+      if (existing) {
+        if (existing.status === 'SUCCESS') {
+          return {
+            payment: formatPaymentDto(existing, user.id),
+            gatewayOrder: {
+              id: existing.gateway_order_id,
+              amount: Math.round(existing.amount * 100),
+              currency: 'INR',
+              keyId: gatewayService.keyId,
+              isDuplicate: true,
+            },
+            isExisting: true,
+          };
+        }
+        if (existing.gateway_order_id && ['CREATED', 'PAYMENT_INITIATED', 'PENDING'].includes(existing.status)) {
+          const dynamicQrString = gatewayService.generateDynamicUpiQr({
+            amount: existing.amount,
+            orderId: existing.gateway_order_id,
+            note: existing.notes || `Payment to ${existing.recipient_name}`,
+          });
+          return {
+            payment: formatPaymentDto(existing, user.id),
+            gatewayOrder: {
+              id: existing.gateway_order_id,
+              amount: Math.round(existing.amount * 100),
+              currency: 'INR',
+              keyId: gatewayService.keyId,
+              dynamicQrString,
+            },
+            isExisting: true,
+          };
+        }
+      }
+    }
+
+    // 2. Associate recipient
+    let recipient = await paymentRepository.findRecipientByUserAndNameOrUpi(user.id, input.recipientName, input.upiId);
+    if (!recipient) {
+      recipient = await paymentRepository.createRecipient({
+        userId: user.id,
+        name: input.recipientName,
+        upiId: input.upiId,
+        phone: request.phone || null,
+        recipientType: input.recipientType,
+        isFavorite: Boolean(request.isFavorite),
+      });
+    } else {
+      await paymentRepository.touchRecipient(recipient.id);
+    }
+
+    // 3. Create Gateway Order using server-side secret credentials
+    const referenceId = `PAY-ORD-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const gatewayOrder = await gatewayService.createOrder({
+      amount: input.amount,
+      currency: 'INR',
+      receipt: referenceId.slice(0, 40),
+      notes: {
+        userId: String(user.id),
+        recipientName: input.recipientName,
+        recipientUpi: input.upiId || '',
+        referenceId,
+      },
+    });
+
+    // 4. Save payment in database with status CREATED
+    const isSandboxOrder = Boolean(gatewayOrder.isSandbox);
+    const payment = await paymentRepository.createPayment({
+      userId: user.id,
+      recipientId: recipient.id,
+      recipientName: input.recipientName,
+      upiId: input.upiId,
+      amount: input.amount,
+      paymentMethod: 'UPI_GATEWAY',
+      status: 'CREATED',
+      categoryId: category.id,
+      accountId: account.id,
+      transactionId: null,
+      paymentDate: input.paymentDate,
+      notes: input.notes,
+      referenceId,
+      idempotencyKey,
+      attemptCount: 1,
+      isSandbox: isSandboxOrder,
+    });
+
+    // Update with gateway order details
+    await paymentRepository.updateGatewayOrderDetails(payment.id, {
+      gatewayOrderId: gatewayOrder.id,
+      gatewayProvider: 'RAZORPAY',
+      status: 'CREATED',
+      isSandbox: isSandboxOrder,
+    });
+
+    const updatedPayment = await paymentRepository.findPaymentById(payment.id);
+
+    // 5. Generate Dynamic Merchant UPI QR fallback string for desktop or alternative phone scan
+    const dynamicQrString = gatewayService.generateDynamicUpiQr({
+      amount: input.amount,
+      orderId: gatewayOrder.id,
+      note: input.notes || `Payment to ${input.recipientName}`,
+    });
+
+    return {
+      payment: formatPaymentDto(updatedPayment, user.id),
+      gatewayOrder: {
+        id: gatewayOrder.id,
+        amount: gatewayOrder.amount,
+        currency: gatewayOrder.currency,
+        keyId: gatewayService.keyId,
+        isSandbox: isSandboxOrder,
+        expiresAt: gatewayOrder.expiresAt,
+        dynamicQrString,
+      },
+    };
+  }
+
+  async markPaymentInitiated(user, id, { platform = 'web' } = {}) {
+    const paymentId = parseInt(id, 10);
+    if (!paymentId) throw badRequest('Invalid payment ID');
+
+    const payment = await paymentRepository.findPaymentById(paymentId);
+    if (!payment) throw notFound('Payment record not found');
+
+    if (payment.user_id !== user.id) {
+      throw forbidden('Access denied');
+    }
+
+    if (payment.status === 'SUCCESS') {
+      return formatPaymentDto(payment, user.id);
+    }
+
+    const updated = await paymentRepository.updatePaymentStatus(payment.id, 'PAYMENT_INITIATED');
+    try {
+      await paymentRepository.createPaymentAttemptLog({
+        paymentId: payment.id,
+        attemptNumber: payment.attempt_count || 1,
+        status: 'INITIATED',
+        platform,
+        upiUri: `gateway://${payment.gateway_order_id || payment.reference_id}`,
+      });
+    } catch (_) {}
+
+    return formatPaymentDto(updated, user.id);
+  }
+
+  async verifyGatewayPayment(user, { paymentId, gatewayOrderId, gatewayPaymentId, gatewaySignature }) {
+    if (!gatewayOrderId || !gatewayPaymentId) {
+      throw badRequest('Gateway order ID and payment ID are required for verification');
+    }
+
+    let payment = null;
+    if (paymentId) {
+      payment = await paymentRepository.findPaymentById(parseInt(paymentId, 10));
+    }
+    if (!payment && gatewayOrderId) {
+      payment = await paymentRepository.findPaymentByGatewayOrderId(gatewayOrderId);
+    }
+    if (!payment) {
+      throw notFound('Payment order record not found');
+    }
+
+    if (payment.user_id !== user.id) {
+      throw forbidden('Access denied');
+    }
+
+    // 1. Idempotency Check: if already SUCCESS, return confirmed payment immediately
+    if (payment.status === 'SUCCESS') {
+      return {
+        payment: formatPaymentDto(payment, user.id),
+        verified: true,
+        alreadyProcessed: true,
+        message: 'Payment already verified and confirmed',
+      };
+    }
+
+    // 2. Validate cryptographic HMAC-SHA256 signature
+    const isValidSignature = gatewayService.verifyPaymentSignature({
+      orderId: gatewayOrderId,
+      paymentId: gatewayPaymentId,
+      signature: gatewaySignature,
+    });
+
+    if (!isValidSignature) {
+      await paymentRepository.recordGatewayPaymentFailure(payment.id, {
+        errorCode: 'SIGNATURE_VERIFICATION_FAILED',
+        errorDescription: 'Payment digital signature verification failed. Transaction rejected for security reasons.',
+      });
+      throw badRequest('Payment verification failed: Invalid digital signature. Transaction declined for security reasons.');
+    }
+
+    // 3. Verify payment details from Gateway
+    const expectedPaise = Math.round(Number(payment.amount) * 100);
+    const gwPayment = await gatewayService.fetchPayment(gatewayPaymentId, expectedPaise);
+    if (gwPayment) {
+      if (gwPayment.amount && gwPayment.amount !== expectedPaise) {
+        throw badRequest(`Payment amount mismatch: Expected ₹${payment.amount}, gateway reported ₹${gwPayment.amount / 100}`);
+      }
+    }
+
+    // 4. Atomic Execution: Update account balance, create expense transaction, mark payment SUCCESS
+    const isSandboxPayment = Boolean(
+      payment.is_sandbox ||
+      gatewayOrderId?.startsWith('order_sand_') ||
+      gatewayPaymentId?.startsWith('pay_sand_') ||
+      gatewaySignature?.startsWith('sandbox_')
+    );
+
+    const noteText = isSandboxPayment
+      ? `[SANDBOX TEST - NO ACTUAL MONEY DEBITED] Payment to: ${payment.recipient_name} | Sim ID: ${gatewayPaymentId}`
+      : [
+          `[Gateway UPI Ref: ${payment.reference_id} | Payment ID: ${gatewayPaymentId}]`,
+          payment.notes,
+        ].filter(Boolean).join(' ');
+
+    const result = await withTransaction(async () => {
+      // Check account balance before recording if not sandbox
+      if (!isSandboxPayment) {
+        const account = await accountRepository.findById(payment.account_id);
+        if (account) {
+          const currentBalance = parseFloat(account.balance || 0);
+          if (currentBalance < payment.amount) {
+            throw badRequest(`Insufficient balance in account "${account.name}". Available balance: ₹${currentBalance.toFixed(2)}`);
+          }
+        }
+      }
+
+      const createdTxn = await transactionRepository.create({
+        amount: payment.amount,
+        description: isSandboxPayment
+          ? `[Sandbox Demo] UPI payment to ${payment.recipient_name}`
+          : `UPI payment to ${payment.recipient_name}`,
+        type: 'EXPENSE',
+        transactionDate: payment.payment_date,
+        notes: noteText.slice(0, 500),
+        userId: user.id,
+        categoryId: payment.category_id,
+        accountId: payment.account_id,
+        recurringTransactionId: null,
+        adminId: user.admin_id || null,
+        isSandbox: isSandboxPayment,
+      });
+
+      // STRICT: In Sandbox / Simulated testing mode, NEVER deduct real account balance!
+      if (!isSandboxPayment) {
+        await accountRepository.updateBalance(payment.account_id, payment.amount, 'EXPENSE');
+      }
+
+      const confirmedPayment = await paymentRepository.recordGatewayPaymentSuccess(payment.id, {
+        gatewayPaymentId,
+        gatewaySignature,
+        transactionId: createdTxn.id,
+        verifiedAt: new Date(),
+      });
+
+      return { confirmedPayment, createdTxn, isSandbox: isSandboxPayment };
+    });
+
+    return {
+      payment: formatPaymentDto(result.confirmedPayment, user.id),
+      transaction: result.createdTxn,
+      verified: true,
+      message: 'Payment verified and confirmed successfully',
+    };
+  }
+
+  async processGatewayWebhook(rawBody, signature, eventPayload) {
+    const isValid = gatewayService.verifyWebhookSignature(rawBody, signature);
+    if (!isValid) {
+      console.warn('[PaymentService] Webhook rejected: Invalid cryptographic signature');
+      return { status: 'rejected', error: 'Invalid webhook signature' };
+    }
+
+    const event = eventPayload?.event;
+    console.log(`[PaymentService] Processing verified gateway webhook: ${event}`);
+
+    if (event === 'payment.captured' || event === 'order.paid') {
+      const paymentEntity = eventPayload?.payload?.payment?.entity;
+      const orderEntity = eventPayload?.payload?.order?.entity;
+      const orderId = paymentEntity?.order_id || orderEntity?.id;
+      const paymentId = paymentEntity?.id;
+
+      if (!orderId) {
+        return { status: 'ignored', reason: 'Missing order_id' };
+      }
+
+      const payment = await paymentRepository.findPaymentByGatewayOrderId(orderId);
+      if (!payment) {
+        return { status: 'not_found' };
+      }
+
+      await paymentRepository.recordWebhookReceived(payment.id);
+
+      if (payment.status === 'SUCCESS') {
+        return { status: 'already_processed' };
+      }
+
+      await withTransaction(async () => {
+        const noteText = `[Webhook Captured Ref: ${payment.reference_id} | Gateway: ${paymentId || ''}] ${payment.notes || ''}`.trim();
+        const createdTxn = await transactionRepository.create({
+          amount: payment.amount,
+          description: `UPI payment to ${payment.recipient_name}`,
+          type: 'EXPENSE',
+          transactionDate: payment.payment_date,
+          notes: noteText.slice(0, 500),
+          userId: payment.user_id,
+          categoryId: payment.category_id,
+          accountId: payment.account_id,
+          recurringTransactionId: null,
+          adminId: null,
+        });
+
+        await accountRepository.updateBalance(payment.account_id, payment.amount, 'EXPENSE');
+
+        await paymentRepository.recordGatewayPaymentSuccess(payment.id, {
+          gatewayPaymentId: paymentId || payment.gateway_payment_id || `webhook_${Date.now()}`,
+          gatewaySignature: signature || 'webhook_verified',
+          transactionId: createdTxn.id,
+          verifiedAt: new Date(),
+        });
+      });
+
+      return { status: 'success', paymentId: payment.id };
+    }
+
+    if (event === 'payment.failed') {
+      const paymentEntity = eventPayload?.payload?.payment?.entity;
+      const orderId = paymentEntity?.order_id;
+      const errorCode = paymentEntity?.error_code || 'PAYMENT_FAILED';
+      const errorDescription = paymentEntity?.error_description || 'Payment was declined by bank or UPI gateway.';
+
+      if (orderId) {
+        const payment = await paymentRepository.findPaymentByGatewayOrderId(orderId);
+        if (payment && payment.status !== 'SUCCESS') {
+          await paymentRepository.recordGatewayPaymentFailure(payment.id, {
+            errorCode,
+            errorDescription,
+          });
+        }
+      }
+      return { status: 'recorded_failure' };
+    }
+
+    return { status: 'ignored', event };
+  }
+
+  async checkPaymentStatus(user, id) {
+    const paymentId = parseInt(id, 10);
+    if (!paymentId) throw badRequest('Invalid payment ID');
+
+    const payment = await paymentRepository.findPaymentById(paymentId);
+    if (!payment) throw notFound('Payment record not found');
+
+    if (payment.user_id !== user.id) {
+      throw forbidden('Access denied');
+    }
+
+    if (['SUCCESS', 'REFUNDED', 'CASH_PAID'].includes(payment.status)) {
+      return {
+        payment: formatPaymentDto(payment, user.id),
+        status: payment.status,
+        isTerminal: true,
+      };
+    }
+
+    // Check with gateway if order is paid
+    if (payment.gateway_order_id) {
+      const gwOrder = await gatewayService.fetchOrder(payment.gateway_order_id);
+      if (gwOrder && (gwOrder.status === 'paid' || gwOrder.amount_paid > 0)) {
+        return await this.verifyGatewayPayment(user, {
+          paymentId: payment.id,
+          gatewayOrderId: payment.gateway_order_id,
+          gatewayPaymentId: payment.gateway_payment_id || `gw_poll_${Date.now()}`,
+          gatewaySignature: payment.gateway_signature || 'verified_via_poll',
+        });
+      }
+    }
+
+    return {
+      payment: formatPaymentDto(payment, user.id),
+      status: payment.status,
+      isTerminal: payment.status === 'FAILED',
+    };
+  }
+
+  async safeRetryGatewayPayment(user, id) {
+    const paymentId = parseInt(id, 10);
+    if (!paymentId) throw badRequest('Invalid payment ID');
+
+    const payment = await paymentRepository.findPaymentById(paymentId);
+    if (!payment) throw notFound('Payment record not found');
+
+    if (payment.user_id !== user.id) {
+      throw forbidden('Access denied');
+    }
+
+    // Check gateway status first to PREVENT duplicate debits
+    if (payment.gateway_order_id) {
+      const gwOrder = await gatewayService.fetchOrder(payment.gateway_order_id);
+      if (gwOrder && (gwOrder.status === 'paid' || gwOrder.amount_paid > 0)) {
+        const verified = await this.verifyGatewayPayment(user, {
+          paymentId: payment.id,
+          gatewayOrderId: payment.gateway_order_id,
+          gatewayPaymentId: payment.gateway_payment_id || `gw_poll_${Date.now()}`,
+          gatewaySignature: payment.gateway_signature || 'verified_via_poll',
+        });
+        return {
+          payment: verified.payment,
+          alreadyPaid: true,
+          message: 'Payment was already confirmed on the gateway. No new charge created.',
+        };
+      }
+    }
+
+    if (payment.status === 'SUCCESS') {
+      throw badRequest('Payment is already successful and cannot be retried.');
+    }
+
+    // Generate FRESH gateway order ID (never reuse failed order ID)
+    const newReferenceId = `PAY-ORD-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const newGatewayOrder = await gatewayService.createOrder({
+      amount: payment.amount,
+      currency: 'INR',
+      receipt: newReferenceId.slice(0, 40),
+      notes: {
+        userId: String(user.id),
+        recipientName: payment.recipient_name,
+        referenceId: newReferenceId,
+        retryOf: String(payment.id),
+      },
+    });
+
+    const newAttemptCount = (payment.attempt_count || 1) + 1;
+    await paymentRepository.updatePaymentAttempt(payment.id, {
+      attemptCount: newAttemptCount,
+      referenceId: newReferenceId,
+      status: 'CREATED',
+    });
+
+    await paymentRepository.updateGatewayOrderDetails(payment.id, {
+      gatewayOrderId: newGatewayOrder.id,
+      gatewayProvider: 'RAZORPAY',
+      status: 'CREATED',
+    });
+
+    const updated = await paymentRepository.findPaymentById(payment.id);
+
+    const dynamicQrString = gatewayService.generateDynamicUpiQr({
+      amount: payment.amount,
+      orderId: newGatewayOrder.id,
+      note: payment.notes || `Payment to ${payment.recipient_name}`,
+    });
+
+    return {
+      payment: formatPaymentDto(updated, user.id),
+      gatewayOrder: {
+        id: newGatewayOrder.id,
+        amount: newGatewayOrder.amount,
+        currency: newGatewayOrder.currency,
+        keyId: gatewayService.keyId,
+        isSandbox: newGatewayOrder.isSandbox,
+        expiresAt: newGatewayOrder.expiresAt,
+        dynamicQrString,
+      },
+    };
+  }
+
+  async cancelPayment(user, id) {
+    const paymentId = parseInt(id, 10);
+    if (!paymentId) throw badRequest('Invalid payment ID');
+
+    const payment = await paymentRepository.findPaymentById(paymentId);
+    if (!payment) throw notFound('Payment record not found');
+
+    if (payment.user_id !== user.id) {
+      throw forbidden('Access denied');
+    }
+
+    if (payment.status === 'SUCCESS' || payment.status === 'CASH_PAID') {
+      throw badRequest('Cannot cancel an already completed payment');
+    }
+
+    const updated = await paymentRepository.updatePaymentStatus(payment.id, 'CANCELLED');
+    return formatPaymentDto(updated, user.id);
   }
 }
 

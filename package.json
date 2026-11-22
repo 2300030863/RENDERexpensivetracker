@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/security.test.js test/payment.test.js test/qrParser.test.js"
+    "test": "node --test test/security.test.js test/payment.test.js test/qrParser.test.js test/googleAuth.test.js test/gatewayPayment.test.js"
   },
   "keywords": [
     "expense-tracker",

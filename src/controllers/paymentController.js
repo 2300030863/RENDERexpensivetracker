@@ -126,6 +126,72 @@ class PaymentController {
       next(error);
     }
   }
+
+  getGatewayConfig(req, res, next) {
+    try {
+      const config = paymentService.getGatewayConfig();
+      return res.status(200).json(config);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createGatewayOrder(req, res, next) {
+    try {
+      const result = await paymentService.createGatewayOrder(req.user, req.body);
+      return res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async markPaymentInitiated(req, res, next) {
+    try {
+      const result = await paymentService.markPaymentInitiated(req.user, req.params.id, req.body);
+      return res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async verifyGatewayPayment(req, res, next) {
+    try {
+      const result = await paymentService.verifyGatewayPayment(req.user, req.body);
+      return res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async checkPaymentStatus(req, res, next) {
+    try {
+      const result = await paymentService.checkPaymentStatus(req.user, req.params.id);
+      return res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async safeRetryGatewayPayment(req, res, next) {
+    try {
+      const result = await paymentService.safeRetryGatewayPayment(req.user, req.params.id);
+      return res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async processGatewayWebhook(req, res, next) {
+    try {
+      const signature = req.headers['x-razorpay-signature'] || req.headers['x-gateway-signature'];
+      const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
+      const result = await paymentService.processGatewayWebhook(rawBody, signature, req.body);
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error('[PaymentController] Webhook error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+  }
 }
 
 module.exports = new PaymentController();

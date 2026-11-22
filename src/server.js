@@ -117,8 +117,15 @@ app.use(
   })
 );
 
-// 5. Body parsers with sensible limits
-app.use(express.json({ limit: '1mb' }));
+// 5. Body parsers with sensible limits & raw body capture for webhook signature verification
+app.use(
+  express.json({
+    limit: '1mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 6. Never let a password hash leave the API, whatever a controller returns

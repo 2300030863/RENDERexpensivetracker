@@ -30,13 +30,14 @@ class PaymentRepository {
     referenceId,
     idempotencyKey = null,
     attemptCount = 1,
+    isSandbox = false,
   }) {
     const sql = `
       INSERT INTO payments (
         user_id, recipient_id, recipient_name, upi_id, amount,
         payment_method, status, category_id, account_id, transaction_id,
-        payment_date, notes, reference_id, idempotency_key, attempt_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_date, notes, reference_id, idempotency_key, attempt_count, is_sandbox
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const result = await execute(sql, [
       userId,
@@ -54,6 +55,7 @@ class PaymentRepository {
       referenceId,
       idempotencyKey,
       attemptCount,
+      isSandbox ? 1 : 0,
     ]);
     return await this.findPaymentById(result.insertId);
   }
@@ -95,6 +97,61 @@ class PaymentRepository {
     const sql = `${this._basePaymentSelect()} WHERE p.reference_id = ?`;
     const rows = await query(sql, [referenceId]);
     return rows[0] || null;
+  }
+
+  async findPaymentByGatewayOrderId(gatewayOrderId) {
+    if (!gatewayOrderId) return null;
+    const sql = `${this._basePaymentSelect()} WHERE p.gateway_order_id = ? LIMIT 1`;
+    const rows = await query(sql, [gatewayOrderId]);
+    return rows[0] || null;
+  }
+
+  async findPaymentByGatewayPaymentId(gatewayPaymentId) {
+    if (!gatewayPaymentId) return null;
+    const sql = `${this._basePaymentSelect()} WHERE p.gateway_payment_id = ? LIMIT 1`;
+    const rows = await query(sql, [gatewayPaymentId]);
+    return rows[0] || null;
+  }
+
+  async updateGatewayOrderDetails(id, { gatewayOrderId, gatewayProvider = 'RAZORPAY', status = 'CREATED', isSandbox = false }) {
+    const sql = `
+      UPDATE payments 
+      SET gateway_order_id = ?, gateway_provider = ?, status = ?, is_sandbox = ?
+      WHERE id = ?
+    `;
+    await execute(sql, [gatewayOrderId, gatewayProvider, status, isSandbox ? 1 : 0, id]);
+    return await this.findPaymentById(id);
+  }
+
+  async recordGatewayPaymentSuccess(id, { gatewayPaymentId, gatewaySignature, transactionId = null, verifiedAt = new Date() }) {
+    const sql = `
+      UPDATE payments 
+      SET status = 'SUCCESS',
+          gateway_payment_id = ?,
+          gateway_signature = ?,
+          transaction_id = COALESCE(?, transaction_id),
+          verified_at = ?
+      WHERE id = ?
+    `;
+    await execute(sql, [gatewayPaymentId, gatewaySignature, transactionId, verifiedAt, id]);
+    return await this.findPaymentById(id);
+  }
+
+  async recordGatewayPaymentFailure(id, { errorCode = null, errorDescription = null }) {
+    const sql = `
+      UPDATE payments 
+      SET status = 'FAILED',
+          gateway_error_code = ?,
+          gateway_error_description = ?
+      WHERE id = ?
+    `;
+    await execute(sql, [errorCode, errorDescription, id]);
+    return await this.findPaymentById(id);
+  }
+
+  async recordWebhookReceived(id) {
+    const sql = `UPDATE payments SET webhook_received_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await execute(sql, [id]);
   }
 
   async findPaymentsByUser(userId, filters = {}, limit = 20, offset = 0) {

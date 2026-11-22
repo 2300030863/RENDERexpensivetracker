@@ -17,7 +17,7 @@ async function fetchJson(url, options = {}) {
   return { ok: response.ok, status: response.status, body };
 }
 
-const invalid = () => new HttpError(401, 'Google sign-in could not be verified', '401');
+const invalid = (msg = 'Google sign-in could not be verified') => new HttpError(401, msg, '401');
 
 /**
  * Verify a token with Google and return the account's profile.
@@ -26,7 +26,7 @@ const invalid = () => new HttpError(401, 'Google sign-in could not be verified',
  */
 async function verifyGoogleToken(token) {
   if (typeof token !== 'string' || token.length < 20 || token.length > 4096) {
-    throw invalid();
+    throw invalid('Google sign-in token is missing or malformed');
   }
 
   try {
@@ -36,8 +36,14 @@ async function verifyGoogleToken(token) {
       const { ok, body } = await fetchJson(
         `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`
       );
-      if (!ok || !body || body.aud !== GOOGLE_CLIENT_ID) throw invalid();
-      if (!body.email || String(body.email_verified) !== 'true') throw invalid();
+      if (!ok || !body) throw invalid('Google ID token could not be verified');
+      const tokenAud = body.aud || body.azp;
+      if (tokenAud !== GOOGLE_CLIENT_ID) {
+        throw invalid('Google sign-in verification failed: Client ID mismatch');
+      }
+      if (!body.email || String(body.email_verified) !== 'true') {
+        throw new HttpError(401, 'Your Google email address is not verified', '401');
+      }
       return {
         email: String(body.email).toLowerCase(),
         firstName: body.given_name || body.name || '',
@@ -49,14 +55,22 @@ async function verifyGoogleToken(token) {
     const info = await fetchJson(
       `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`
     );
-    if (!info.ok || !info.body) throw invalid();
-    if (info.body.aud !== GOOGLE_CLIENT_ID && info.body.azp !== GOOGLE_CLIENT_ID) throw invalid();
+    if (!info.ok || !info.body) {
+      throw invalid('Google access token is invalid or has expired. Please sign in again.');
+    }
+    const tokenAudience = info.body.issued_to || info.body.audience || info.body.aud || info.body.azp;
+    if (tokenAudience !== GOOGLE_CLIENT_ID) {
+      console.warn(`Google OAuth client ID mismatch: received '${tokenAudience}', expected '${GOOGLE_CLIENT_ID}'`);
+      throw invalid('Google sign-in verification failed: Client ID mismatch');
+    }
 
     // 2. Read the profile from Google itself.
     const profile = await fetchJson('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!profile.ok || !profile.body || !profile.body.email) throw invalid();
+    if (!profile.ok || !profile.body || !profile.body.email) {
+      throw invalid('Could not retrieve user profile from Google. Please try again.');
+    }
     if (profile.body.email_verified !== true && String(profile.body.email_verified) !== 'true') {
       throw new HttpError(401, 'Your Google email address is not verified', '401');
     }
